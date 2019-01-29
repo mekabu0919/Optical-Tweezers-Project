@@ -1002,7 +1002,7 @@ class RightDockWidget(QWidget):
         vbox.addWidget(self.SLMDial)
 
         self.correctImg = [r'..\..\CAL_LSH0701554_1050nm.bmp', r'..\..\CAL_LSH0701554_1060nm.bmp']
-        self.alphaList = [213, 215]
+        self.alphaList = [214, 216]
         self.correction = cv2.imread(self.correctImg[0], 0)
         self.alpha = self.alphaList[0]
         self.base = self.correction
