@@ -827,7 +827,7 @@ class centralWidget(QWidget):
                 print("ERROR: AOILeft")
             if dll.SetInt(self.Handle, "AOIHeight", self.AOIHeightBox.value()):
                 print("ERROR: AOIHeight")
-            if dll.SetInt(self.Handle, "AOITop", self.AOILeftBox.value()):
+            if dll.SetInt(self.Handle, "AOITop", self.AOITopBox.value()):
                 print("ERROR: AOITop")
         else:
             if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.AOISizeBox.currentIndex()))):
