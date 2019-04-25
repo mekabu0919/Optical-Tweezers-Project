@@ -16,8 +16,14 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg\
  import FigureCanvasQTAgg as FigureCanvas
 
-# os.chdir(os.path.dirname(__file__)+r'\Andor_dll\Andor_dll')
-os.chdir(r'Andor_dll\Andor_dll')
+os.chdir(os.path.dirname(__file__)+r'\Andor_dll\Andor_dll')
+# os.chdir(r'Andor_dll\Andor_dll')
+
+class nsPrms(ct.Structure):
+    _fields_ = [("norm", ct.c_bool),
+                ("normMax", ct.c_double),
+                ("normMin", ct.c_double),
+                ("sigma", ct.c_double)]
 
 
 class blurPrms(ct.Structure):
@@ -40,7 +46,8 @@ class contPrms(ct.Structure):
 
 
 class processPrms(ct.Structure):
-    _fields_ = [("blur", blurPrms),
+    _fields_ = [("ns", nsPrms),
+                ("blur", blurPrms),
                 ("thres", thresPrms),
                 ("cont", contPrms)]
 
@@ -139,15 +146,15 @@ class ImageAcquirer(QtCore.QThread):
         BufferSize = ct.c_int()
         outputBuffer = (ct.c_ushort * (ImageWidth.value * ImageHeight.value))()
         outBuffer = (ct.c_ubyte*(ImageWidth.value*ImageHeight.value))()
-        mean = ct.c_double()
-        std = ct.c_double()
+        maxVal = ct.c_double()
+        minVal = ct.c_double()
         while not self.stopped:
             if dll.WaitBuffer(self.Handle, ct.byref(Buffer), ct.byref(BufferSize), 10000) == 0:
                 ret = dll.convertBuffer(Buffer, outputBuffer, ImageWidth, ImageHeight, ImageStride)
                 dll.processImageShow(ImageHeight, ImageWidth, outputBuffer, self.prms,
-                                     outBuffer, ct.byref(mean), ct.byref(std))
-                self.mean = mean.value
-                self.std = std.value
+                                     outBuffer, ct.byref(maxVal), ct.byref(minVal))
+                self.max = maxVal.value
+                self.min = minVal.value
                 self.img = np.array(outBuffer).reshape(ImageHeight.value, ImageWidth.value)
                 self.width = ImageWidth.value
                 self.height = ImageHeight.value
@@ -297,10 +304,10 @@ class contWidget(QWidget):
         hbox2 = QHBoxLayout()
         vlayout = QVBoxLayout(self)
 
-        hbox1.addWidget(QLabel('Max'))
-        hbox1.addWidget(self.imgMaxBox)
         hbox1.addWidget(QLabel('Min'))
         hbox1.addWidget(self.imgMinBox)
+        hbox1.addWidget(QLabel('Max'))
+        hbox1.addWidget(self.imgMaxBox)
         hbox2.addWidget(QLabel('x: '), alignment=Qt.AlignRight)
         hbox2.addWidget(self.markerPositionBoxX)
         hbox2.addWidget(QLabel('y: '), alignment=Qt.AlignRight)
@@ -472,11 +479,39 @@ class processWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.prmStruct = processPrms(blurPrms(0,0,0,0),
+        self.prmStruct = processPrms(nsPrms(0,0,0,0),
+                                     blurPrms(0,0,0,0),
                                      thresPrms(0,0,0,0),
                                      contPrms(0,0))
 
         layout = QVBoxLayout(self)
+
+        layout_ns = QHBoxLayout()
+        layout_norm = QHBoxLayout()
+        layout_stand = QHBoxLayout()
+        self.normButton = QRadioButton('Normalize', self)
+        self.normButton.setChecked(True)
+        self.normMax = QSpinBox(self)
+        self.normMax.setRange(0, 4095)
+        self.normMax.setValue(4095)
+        self.normMin = QSpinBox(self)
+        self.normMin.setRange(0, 4095)
+        self.standButton = QRadioButton('Standardize', self)
+        self.sigma = QSpinBox(self)
+        self.sigma.setRange(0, 255)
+        self.sigma.setValue(64)
+        for widget in [self.normButton, QLabel('Min : '), self.normMin, QLabel('Max : '), self.normMax]:
+            if isinstance(widget, QLabel):
+                layout_norm.addWidget(widget, alignment=Qt.AlignRight)
+            else:
+                layout_norm.addWidget(widget)
+        for widget in [self.standButton, QLabel('Sigma : '), self.sigma]:
+            if isinstance(widget, QLabel):
+                layout_stand.addWidget(widget, alignment=Qt.AlignRight)
+            else:
+                layout_stand.addWidget(widget)
+        layout_ns.addLayout(layout_norm)
+        layout_ns.addLayout(layout_stand)
 
         layout_blur = QHBoxLayout()
         self.blurButton = QRadioButton('Blur', self)
@@ -520,6 +555,8 @@ class processWidget(QFrame):
 
         layout.addWidget(QLabel("Process settings"))
         layout.addStretch(1)
+        layout.addLayout(layout_ns)
+        layout.addStretch(1)
         layout.addLayout(layout_blur)
         layout.addStretch(1)
         layout.addLayout(layout_thres)
@@ -531,6 +568,7 @@ class processWidget(QFrame):
         self.setStyleSheet("background-color:white;")
 
     def set_prm(self):
+        self.prmStruct.ns = nsPrms(self.normButton.isChecked(), self.normMax.value(), self.normMin.value(), self.sigma.value())
         self.prmStruct.blur = blurPrms(self.blurButton.isChecked(), self.blurSize.value(), self.blurSize.value(), self.blurSigma.value())
         self.prmStruct.thres = thresPrms(self.thresButton.isChecked(), self.thresVal.value(), 255, self.thresType.currentIndex()+int(self.OtsuButton.isChecked())*8)
         self.prmStruct.cont = contPrms(self.contButton.isChecked(), self.contNum.value())
@@ -645,7 +683,7 @@ class centralWidget(QWidget):
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
 
         self.processWidget = processWidget(self)
-        self.processWidget.applyButton.clicked.connect(self.applyProcessSettings)
+        self.processWidget.applyButton.clicked.connect(self.applyProcessClicked)
 
         self.DIOWidget = DIOWidget(self)
         self.DIOWidget.DIObuttons.buttonClicked[int].connect(self.writeDIO)
@@ -750,8 +788,8 @@ class centralWidget(QWidget):
         image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
         self.ImgWidget.setImage(image)
         if isinstance(source, ImageAcquirer):
-            self.contWidget.imgMaxBox.setText(str(source.mean+2*source.std))
-            self.contWidget.imgMinBox.setText(str(source.mean-2*source.std))
+            self.contWidget.imgMaxBox.setText(str(source.max))
+            self.contWidget.imgMinBox.setText(str(source.min))
 
 
     def startAcquisition(self, checked):
@@ -849,10 +887,16 @@ class centralWidget(QWidget):
         print("Settings applied\n")
         self.runButton.setEnabled(True)
 
-    def applyProcessSettings(self):
+    def applyProcessClicked(self):
+        if self.Tab.currentIndex() == 2:
+            self.applyProcessSettings(True)
+
+    def applyProcessSettings(self, update=False):
         self.processWidget.set_prm()
         self.imageAcquirer.prms = self.processWidget.prmStruct
         self.imageLoader.prms = self.processWidget.prmStruct
+        if update:
+            self.imageLoader.update_img()
 
     def writeDIO(self, val):
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(val))
