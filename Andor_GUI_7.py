@@ -890,6 +890,8 @@ class centralWidget(QWidget):
     def applyProcessClicked(self):
         if self.Tab.currentIndex() == 2:
             self.applyProcessSettings(True)
+        else:
+            self.applyProcessSettings(False)
 
     def applyProcessSettings(self, update=False):
         self.processWidget.set_prm()
