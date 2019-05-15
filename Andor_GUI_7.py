@@ -388,6 +388,8 @@ class imageLoader(QWidget):
         self.currentNumBox.valueChanged.connect(self.update_img)
         self.currentNumBox.setWrapping(True)
 
+        self.imgMaxBox = QLineEdit(self)
+        self.imgMinBox = QLineEdit(self)
         self.anlzButton = QPushButton('Analysis', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
@@ -402,6 +404,10 @@ class imageLoader(QWidget):
         hbox1.addWidget(self.currentNumBox)
 
         hbox2 = QHBoxLayout()
+        hbox2.addWidget(QLabel('Min'))
+        hbox2.addWidget(self.imgMinBox)
+        hbox2.addWidget(QLabel('Max'))
+        hbox2.addWidget(self.imgMaxBox)
         hbox2.addWidget(self.anlzButton)
         hbox2.addWidget(QLabel('Start: '), alignment=Qt.AlignRight)
         hbox2.addWidget(self.anlzStartBox)
@@ -463,14 +469,16 @@ class imageLoader(QWidget):
         buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
         outputBuffer = (ct.c_ushort * (self.width * self.height))()
         outBuffer = (ct.c_ubyte*(self.width*self.height))()
-        mean = ct.c_double()
-        std = ct.c_double()
+        max = ct.c_double()
+        min = ct.c_double()
         ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
         dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
-                             ct.byref(mean), ct.byref(std))
-        self.mean = mean.value
-        self.std = std.value
+                             ct.byref(max), ct.byref(min))
+        self.min = min.value
+        self.max = max.value
         self.img = np.array(outBuffer).reshape(self.height, self.width)
+        self.imgMinBox.setText(str(self.min))
+        self.imgMaxBox.setText(str(self.max))
         self.imgSignal.emit(self)
 
 
