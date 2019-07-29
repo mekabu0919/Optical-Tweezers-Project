@@ -1074,8 +1074,8 @@ class centralWidget(QWidget):
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         height, width, bpc = img.shape
         bpl = bpc * width
-        # self.imgHeight = height
-        # self.imgWidth = width
+        self.imgHeight = height
+        self.imgWidth = width
         img = cv2.circle(img, tuple(self.markerPos), 2, (255,0,0), -1)
         if self.split:
             for dst in self.dst:
