@@ -969,7 +969,7 @@ class centralWidget(QWidget):
         self.MarkerX = 0
         self.MarkerY = 0
         self.imgHeight = 600
-        self.imgWidth = 800
+        self.imgWidth = 600
         self.markerPos = [400, 300]
         self.dst = [0,0,0,0]
         self.split = False
@@ -1067,8 +1067,8 @@ class centralWidget(QWidget):
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         height, width, bpc = img.shape
         bpl = bpc * width
-        # self.imgHeight = height
-        # self.imgWidth = width
+        self.imgHeight = height
+        self.imgWidth = width
         img = cv2.circle(img, tuple(self.markerPos), 2, (255,0,0), -1)
         if self.split:
             for dst in self.dst:
