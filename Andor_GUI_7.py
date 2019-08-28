@@ -222,13 +222,14 @@ class ImageProcesser(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, datfiles, width, height, stride, prms, dir):
+    def setup(self, datfiles, width, height, stride, prms, dir, pBar):
         self.datfiles = datfiles
         self.width = width
         self.height = height
         self.stride = stride
         self.prms = prms
         self.dir = dir
+        self.pBar = pBar
         self.stopped = False
 
     def stop(self):
@@ -241,12 +242,15 @@ class ImageProcesser(QtCore.QThread):
         ImgArry = (ct.c_ushort * (self.width * self.height))()
         point = (ct.c_float*2)()
         pointlst = []
-        for datfile in self.datfiles:
+        num = len(self.datfiles)
+        self.pBar.setMaximum(num-1)
+        for datfile, i in zip(self.datfiles, range(num)):
             rawdata = np.fromfile(datfile, dtype=np.uint8)
             buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
             ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
             dll.processImage(point, self.height, self.width, ImgArry, self.prms)
             pointlst.append([point[0], point[1]])
+            self.pBar.setValue(i)
         DF = pd.DataFrame(np.array(pointlst))
         DF.columns = ['x', 'y']
         DF.to_csv(self.dir + r"\COG.csv")
@@ -503,6 +507,9 @@ class imageLoader(QWidget):
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
 
+        self.progressBar = QProgressBar(self)
+        self.progressBar.setMaximum(100)
+
         self.initLayout()
 
     def initLayout(self):
@@ -524,6 +531,7 @@ class imageLoader(QWidget):
         vbox0.addLayout(hbox01)
         vbox0.addLayout(hbox02)
         vbox0.addLayout(hbox03)
+        vbox0.addWidget(self.progressBar)
 
     def initVal(self):
         self.dirname = None
@@ -894,7 +902,6 @@ class centralWidget(QWidget):
     def __init__(self, parent=None):
         super(centralWidget, self).__init__(parent)
 
-
         self.imageAcquirer = ImageAcquirer()
         self.imagePlayer = ImagePlayer()
         self.imageProcesser = ImageProcesser()
@@ -1204,7 +1211,7 @@ class centralWidget(QWidget):
         logging.info("setup")
         self.imageProcesser.setup(processfiles, self.imageLoader.width,
                                   self.imageLoader.height, self.imageLoader.stride,
-                                  self.processWidget.prmStruct, self.imageLoader.dirname)
+                                  self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar)
         self.imageProcesser.run()
 
     def exportBMP(self):
