@@ -17,7 +17,6 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg\
  import FigureCanvasQTAgg as FigureCanvas
 
-# Declaration for ctypes
 
 os.chdir(os.path.dirname(__file__)+r'\Andor_dll\Andor_dll')
 # os.chdir(r'Andor_dll\Andor_dll')
@@ -869,6 +868,30 @@ class DIOWidget(QGroupBox):
         self.setTitle("DIO Controller")
 
 
+class shutterWidget(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.openButton = QPushButton('Open', self)
+        self.closeButton = QPushButton('Close', self)
+        self.openButton.setCheckable(True)
+        self.closeButton.setCheckable(True)
+
+        self.shutterButtons = QButtonGroup(self)
+        self.shutterButtons.addButton(self.openButton)
+        self.shutterButtons.addButton(self.closeButton)
+        self.shutterButtons.setExclusive(True)
+        self.shutterButtons.setId(self.openButton, 0)
+        self.shutterButtons.setId(self.closeButton, 1)
+
+        vbox = QVBoxLayout(self)
+        # vbox.addWidget(QLabel('DIO Control'))
+        vbox.addWidget(self.openButton)
+        vbox.addWidget(self.closeButton)
+
+        self.closeButton.setChecked(True)
+        self.setTitle("Shutter Controller")
+
 class Logger(logging.Handler):
     def __init__(self, parent):
      super().__init__()
@@ -910,6 +933,7 @@ class centralWidget(QWidget):
         self.imageLoader = imageLoader(self)
         self.processWidget = processWidget(self)
         self.DIOWidget = DIOWidget(self)
+        self.shutterWidget = shutterWidget(self)
         self.logWidget = LogWidget(self)
         self.acquisitionWidget = AcquisitionWidget(self)
 
@@ -934,6 +958,8 @@ class centralWidget(QWidget):
 
         self.DIOWidget.DIObuttons.buttonClicked[int].connect(self.writeDIO)
 
+        self.shutterWidget.shutterButtons.buttonClicked[int].connect(self.writeDIO)
+
         self.acquisitionWidget.contWidget.markerPositionBoxX.valueChanged.connect(self.moveMarkerX)
         self.acquisitionWidget.contWidget.markerPositionBoxY.valueChanged.connect(self.moveMarkerY)
         self.acquisitionWidget.contWidget.markerFactorBox.valueChanged.connect(self.factorChanged)
@@ -957,15 +983,19 @@ class centralWidget(QWidget):
 
     def initLayout(self):
 
-        hbox002 = QHBoxLayout()
-        hbox002.addWidget(self.SLM_Controller)
-        hbox002.addWidget(self.DIOWidget)
-        hbox002.addWidget(self.logWidget)
+        vbox0121 = QVBoxLayout()
+        vbox0121.addWidget(self.DIOWidget)
+        vbox0121.addWidget(self.shutterWidget)
+
+        hbox012 = QHBoxLayout()
+        hbox012.addWidget(self.SLM_Controller)
+        hbox012.addLayout(vbox0121)
+        hbox012.addWidget(self.logWidget)
 
         vbox01 = QVBoxLayout()
         vbox01.addWidget(self.modeTab)
         vbox01.addWidget(self.processWidget)
-        vbox01.addLayout(hbox002)
+        vbox01.addLayout(hbox012)
 
         hbox0 = QHBoxLayout(self)
         hbox0.addWidget(self.ImgWidget)
@@ -1008,6 +1038,8 @@ class centralWidget(QWidget):
 
         self.DIOhandle = ct.c_void_p()
         dll.initDIO(ct.byref(self.DIOhandle))
+        self.shutterHandle = ct.c_void_p()
+        dll.initDIO_shutter(ct.byref(self.DIOhandle))
         self.fin = False
 
     def finalizeCamera(self):
@@ -1018,6 +1050,7 @@ class centralWidget(QWidget):
         self.acquisitionWidget.applyButton.setEnabled(False)
         self.acquisitionWidget.initButton.setEnabled(True)
         dll.finDIO(self.DIOhandle)
+        dll.finDIO(self.shutterHandle)
         self.fin = True
 
     def moveMarkerX(self, val):
