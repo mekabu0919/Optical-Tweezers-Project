@@ -371,6 +371,13 @@ class fixedWidget(QWidget):
         self.aqTypeBox.addItems(aqTypeList)
         self.cntrPosLabel = QLabel("Centre of position:", self)
         self.thresBox = QDoubleSpinBox(self)
+        self.periodButton = QPushButton('Periodic', self)
+        self.periodButton.setCheckable(True)
+        self.repeatBox = QSpinBox(self)
+        self.repeatBox.setMinimum(1)
+        self.currentRepeatBox = QLineEdit(self)
+        self.currentRepeatBox.setReadOnly(True)
+        self.currentRepeatBox.setSizePolicy(QSizePolicy(5, 0))
 
         self.initLayout()
 
@@ -387,9 +394,16 @@ class fixedWidget(QWidget):
         hbox01.addWidget(self.cntrPosLabel)
         hbox01.addLayout(hbox012)
 
+        hbox021 = LHLayout("Repeat: ", self.repeatBox)
+        hbox02 = QHBoxLayout()
+        hbox02.addWidget(self.periodButton)
+        hbox02.addLayout(hbox021)
+        hbox02.addWidget(self.currentRepeatBox)
+
         vbox0 = QVBoxLayout(self)
         vbox0.addLayout(hbox00)
         vbox0.addLayout(hbox01)
+        vbox0.addLayout(hbox02)
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -881,8 +895,8 @@ class shutterWidget(QGroupBox):
         self.shutterButtons.addButton(self.openButton)
         self.shutterButtons.addButton(self.closeButton)
         self.shutterButtons.setExclusive(True)
-        self.shutterButtons.setId(self.openButton, 0)
-        self.shutterButtons.setId(self.closeButton, 1)
+        self.shutterButtons.setId(self.openButton, 3)
+        self.shutterButtons.setId(self.closeButton, 2)
 
         vbox = QVBoxLayout(self)
         # vbox.addWidget(QLabel('DIO Control'))
@@ -948,7 +962,7 @@ class centralWidget(QWidget):
     def initSignal(self):
         self.imageAcquirer.imgSignal.connect(self.update_frame)
         self.imageAcquirer.posSignal.connect(self.applyCenter)
-        self.imageAcquirer.finished.connect(self.acquisitionFinished)
+        # self.imageAcquirer.finished.connect(self.acquisitionFinished)
 
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
@@ -1013,6 +1027,7 @@ class centralWidget(QWidget):
         self.Handle = ct.c_int()
         self.ref = ct.c_int()
         self.CentralPos = None
+        self.outDIO = [0, 0, 0, 0, 0]
         self.fin = True
 
         self.openSettings()
@@ -1038,8 +1053,6 @@ class centralWidget(QWidget):
 
         self.DIOhandle = ct.c_void_p()
         dll.initDIO(ct.byref(self.DIOhandle))
-        self.shutterHandle = ct.c_void_p()
-        dll.initDIO_shutter(ct.byref(self.DIOhandle))
         self.fin = False
 
     def finalizeCamera(self):
@@ -1050,7 +1063,6 @@ class centralWidget(QWidget):
         self.acquisitionWidget.applyButton.setEnabled(False)
         self.acquisitionWidget.initButton.setEnabled(True)
         dll.finDIO(self.DIOhandle)
-        dll.finDIO(self.shutterHandle)
         self.fin = True
 
     def moveMarkerX(self, val):
@@ -1135,41 +1147,69 @@ class centralWidget(QWidget):
                 self.imageAcquirer.start()
 
             elif self.acquisitionWidget.Tab.currentIndex() == 1:
-                dir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                if self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==0:
-                    self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(dir),
-                                             num=ct.c_int(num), count_p=count_p)
+                if self.acquisitionWidget.fixedWidget.periodButton.isChecked():
+                    mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                    num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+                    repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
+                    self.writeDIO(2)
                     logging.info('Acquisition start')
-                    self.imageAcquirer.start()
-                    while not self.imageAcquirer.stopped:
-                        QTimer.singleShot(30, lambda: self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value)))
-                        QApplication.processEvents()
-                    logging.info('Acquisition stopped\n')
+                    for i in range(repeat*2):
+                        self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
+                        self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                 num=ct.c_int(num), count_p=count_p)
+                        self.imageAcquirer.start()
+                        ref = count.value
+                        while not self.imageAcquirer.stopped:
+                            if count.value > (ref + 5):
+                                self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                QApplication.processEvents()
+                                ref = count.value
+                        count = ct.c_int(0)
+                        count_p = ct.pointer(count)
+                        self.writeDIO(3-i%2)
+                        waitTime = time.time()
+                        while True:
+                            now = time.time()
+                            if (now - 3) > waitTime:
+                                break
                     self.acquisitionWidget.runButton.setChecked(False)
-                elif self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==1:
-                    self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(dir),
-                                             num=ct.c_int(num), count_p=count_p,
-                                             center=self.CentralPos, DIOthres=self.acquisitionWidget.fixedWidget.thresBox.value(),
-                                             DIOhandle=self.DIOhandle, mode=1)
-                    self.applyProcessSettings()
-                    self.imageAcquirer.start()
-                elif self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==2:
-                    self.imageAcquirer.setup(self.Handle,  dir=ct.c_char_p(dir),
-                                             num=ct.c_int(num), count_p=count_p,
-                                             center=self.CentralPos, DIOthres=self.acquisitionWidget.fixedWidget.thresBox.value(),
-                                             DIOhandle=self.DIOhandle, mode=2)
-                    self.applyProcessSettings()
-                    self.imageAcquirer.start()
-            else:
-                if self.imageLoader.dirname:
-                    self.applyProcessSettings()
-                    self.imagePlayer.setup()
-                    self.acquisitionWidget.runButton.setText('STOP')
-                    self.imagePlayer.run()
+                    logging.info('Acquisition stopped')
                 else:
-                    logging.error('No directory selected!')
-                    self.acquisitionWidget.runButton.setChecked(False)
+                    dir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                    num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+                    if self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==0:
+                        self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(dir),
+                                                 num=ct.c_int(num), count_p=count_p)
+                        logging.info('Acquisition start')
+                        self.imageAcquirer.start()
+                        while not self.imageAcquirer.stopped:
+                            QTimer.singleShot(30, lambda: self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value)))
+                            QApplication.processEvents()
+                        logging.info('Acquisition stopped\n')
+                        self.acquisitionWidget.runButton.setChecked(False)
+                    elif self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==1:
+                        self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(dir),
+                                                 num=ct.c_int(num), count_p=count_p,
+                                                 center=self.CentralPos, DIOthres=self.acquisitionWidget.fixedWidget.thresBox.value(),
+                                                 DIOhandle=self.DIOhandle, mode=1)
+                        self.applyProcessSettings()
+                        self.imageAcquirer.start()
+                    elif self.acquisitionWidget.fixedWidget.aqTypeBox.currentIndex()==2:
+                        self.imageAcquirer.setup(self.Handle,  dir=ct.c_char_p(dir),
+                                                 num=ct.c_int(num), count_p=count_p,
+                                                 center=self.CentralPos, DIOthres=self.acquisitionWidget.fixedWidget.thresBox.value(),
+                                                 DIOhandle=self.DIOhandle, mode=2)
+                        self.applyProcessSettings()
+                        self.imageAcquirer.start()
+            # else:
+            #     if self.imageLoader.dirname:
+            #         self.applyProcessSettings()
+            #         self.imagePlayer.setup()
+            #         self.acquisitionWidget.runButton.setText('STOP')
+            #         self.imagePlayer.run()
+            #     else:
+            #         logging.error('No directory selected!')
+            #         self.acquisitionWidget.runButton.setChecked(False)
 
         else:
             self.imageAcquirer.stopped = True
@@ -1230,8 +1270,14 @@ class centralWidget(QWidget):
         if update:
             self.imageLoader.update_img()
 
-    def writeDIO(self, val):
-        dll.writeDIO(self.DIOhandle, ct.c_ubyte(val))
+    def writeDIO(self, signal):
+        port = signal // 2
+        val = signal % 2
+        self.outDIO[-1*port-1] = val
+        strings = ''.join(map(str, self.outDIO))
+        out = int(strings, 2)
+        logging.debug(strings)
+        dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
 
     def analyzeDatas(self):
         self.applyProcessSettings()
