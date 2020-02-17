@@ -18,7 +18,8 @@ from matplotlib.backends.backend_qt5agg\
  import FigureCanvasQTAgg as FigureCanvas
 
 
-os.chdir(os.path.dirname(__file__)+r'\Andor_dll\Andor_dll')
+os.chdir(os.path.dirname(__file__))
+os.chdir(r'../Andor_dll/Andor_dll')
 # os.chdir(r'Andor_dll\Andor_dll')
 
 class nsPrms(ct.Structure):
@@ -52,7 +53,6 @@ class processPrms(ct.Structure):
                 ("blur", blurPrms),
                 ("thres", thresPrms),
                 ("cont", contPrms)]
-
 
 dll = ct.windll.LoadLibrary(r'..\x64\Release\Andor_dll.dll')
 dll.InitialiseLibrary()
@@ -727,7 +727,7 @@ class SLM_Controller(QGroupBox):
         self.modulateButton.toggled.connect(self.modulate_SLM)
 
         self.wavelengthBox = QComboBox(self)
-        self.wavelengthBox.addItems(("1053nm", "1064nm"))
+        self.wavelengthBox.addItems(("1050nm", "1060nm", "1064nm"))
         self.wavelengthBox.currentIndexChanged.connect(self.wavelengthChanged)
 
         self.pitchBox = QSpinBox(self)
@@ -782,8 +782,9 @@ class SLM_Controller(QGroupBox):
         self.setTitle("SLM Controller")
 
     def initVal(self):
-        self.correctImg = [r'..\..\CAL_LSH0701554_1050nm.bmp', r'..\..\CAL_LSH0701554_1060nm.bmp']
-        self.alphaList = [214, 216]
+        self.correctImg = [r'CorrectImages\CAL_LSH0701554_1050nm.bmp', \
+        r'CorrectImages\CAL_LSH0701554_1060nm.bmp', r'CorrectImages\CAL_LSH0701554_1064nm.bmp']
+        self.alphaList = [214, 216, 217]
         self.correction = cv2.imread(self.correctImg[0], 0)
         self.alpha = self.alphaList[0]
         self.base = self.correction
