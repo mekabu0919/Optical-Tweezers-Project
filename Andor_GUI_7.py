@@ -1300,6 +1300,25 @@ class centralWidget(QWidget):
         if fileToSave:
             cv2.imwrite(fileToSave[0], self.imageLoader.img)
 
+    def exportSeries(self):
+        dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
+        if dirToSave:
+            start = self.imageLoader.anlzStartBox.value()
+            end = self.imageLoader.anlzEndBox.value()
+            for i in range(start, end):
+                rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
+                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+                outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
+                max = ct.c_double()
+                min = ct.c_double()
+                ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
+                                     ct.byref(max), ct.byref(min))
+                img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                cv2.imwrite(dirToSave[0]+"/"+str(i)+".bmp")
+
+
     def openSettings(self):
         self.settings = QSettings('setting.ini', 'Andor_GUI')
         settings = self.settings
@@ -1362,6 +1381,8 @@ class mainWindow(QMainWindow):
 
         expAct = QAction('Export img', self)
         expAct.triggered.connect(self.central.exportBMP)
+        expSAct = QAction('Export image series', self)
+        expSAct.triggered.connect(self.central.exportSeries)
         exitAct = QAction('Exit', self)
         exitAct.triggered.connect(self.close)
         fileMenu.addAction(expAct)
