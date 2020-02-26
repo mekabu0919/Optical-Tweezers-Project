@@ -438,6 +438,8 @@ class AcquisitionWidget(QWidget):
         self.AOITopBox = QSpinBox(self)
         self.AOIWidthBox = QSpinBox(self)
         self.AOIHeightBox = QSpinBox(self)
+        self.CenterXBox = QSpinBox(self)
+        self.CenterYBox = QSpinBox(self)
         AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
         for obj in AOIBoxList:
             obj.setMaximum(2048)
@@ -471,6 +473,8 @@ class AcquisitionWidget(QWidget):
         hbox01.addLayout(LHLayout("Left: ", self.AOILeftBox))
         hbox01.addLayout(LHLayout("Width: ", self.AOIWidthBox))
         hbox01.addLayout(LHLayout("Height: ", self.AOIHeightBox))
+        hbox01.addLayout(LHLayout("X: ", self.CenterXBox))
+        hbox01.addLayout(LHLayout("Y: ", self.CenterYBox))
 
         hbox03 = QHBoxLayout()
         hbox03.addWidget(self.initButton)
@@ -1224,6 +1228,19 @@ class centralWidget(QWidget):
         self.acquisitionWidget.runButton.setChecked(False)
         self.acquisitionWidget.fixedWidget.cntrPosLabel.setText("Center of position: ({:.2f}, {:.2f})".format(self.CentralPos[0], self.CentralPos[1]))
 
+    def setAOICenter(self):
+        centerX = self.acquisitionWidget.CenterXBox.value()
+        centerY = self.acquisitionWidget.CenterYBox.value()
+        AOISizeIndex = self.acquisitionWidget.AOISizeBox.currentIndex()
+        AOISize = 2048/2**AOISizeIndex
+        if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
+            logging.error("AOIWidth")
+        if dll.setInt(self.Handle, "AOILeft", int(centerX - AOISize/2)):
+            logging.error("AOILeft")
+        if dll.SetInt(self.Handle, "AOIHeight", int(AOISize)):
+            logging.error("AOIHeight")
+        if dll.setInt(self.Handle, "AOITop", int(centerY - AOISize/2)):
+            logging.error("AOILeft")
 
     def applySettings(self):
         dll.SetFloat(self.Handle, "Exposure Time", self.acquisitionWidget.exposeTBox.value())
