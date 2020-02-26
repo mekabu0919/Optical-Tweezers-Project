@@ -1239,11 +1239,11 @@ class centralWidget(QWidget):
         AOISize = 2048/2**AOISizeIndex
         if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
             logging.error("AOIWidth")
-        if dll.setInt(self.Handle, "AOILeft", int(1024 + centerX - AOISize/2)):
+        if dll.SetInt(self.Handle, "AOILeft", int(1024 + centerX - AOISize/2)):
             logging.error("AOILeft")
         if dll.SetInt(self.Handle, "AOIHeight", int(AOISize)):
             logging.error("AOIHeight")
-        if dll.setInt(self.Handle, "AOITop", int(1024 + centerY - AOISize/2)):
+        if dll.SetInt(self.Handle, "AOITop", int(1024 + centerY - AOISize/2)):
             logging.error("AOILeft")
 
     def applySettings(self):
@@ -1260,7 +1260,7 @@ class centralWidget(QWidget):
             if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOITopBox.value()):
                 logging.error("AOITop")
         elif index == 0:
-            if dll.SetInt(self.Handle, "AOIWidth", 2048:
+            if dll.SetInt(self.Handle, "AOIWidth", 2048):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOIHeight", 2048):
                 logging.error("AOIHeight")
