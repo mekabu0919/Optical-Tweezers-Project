@@ -732,7 +732,6 @@ class SLM_Controller(QGroupBox):
 
         self.pitchBox = QSpinBox(self)
         self.pitchBox.setMinimum(1)
-        self.pitchBox.setValue(23)
 
         self.SLMDial = QDial(self)
         self.SLMDial.setWrapping(True)
@@ -1343,6 +1342,11 @@ class centralWidget(QWidget):
         self.acquisitionWidget.fixedWidget.thresBox.setValue(settings.value('DIO threshold', type=float))
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
+        self.SLM_Controller.wavelengthBox.setCurrentIndex(settings.value('SLM wavelength', type=int))
+        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=int))
+        self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
+        self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
+        self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
 
     def writeSettings(self):  # Save current settings
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1365,6 +1369,11 @@ class centralWidget(QWidget):
         self.settings.setValue('DIO threshold', self.acquisitionWidget.fixedWidget.thresBox.value())
         self.settings.setValue('marker factor', self.acquisitionWidget.contWidget.markerFactorBox.value())
         self.settings.setValue('dir image', self.imageLoader.dirname)
+        self.settings.setValue('SLM wavelength', self.SLM_Controller.wavelengthBox.currentIndex())
+        self.settings.setValue('SLM pitch', self.SLM_Controller.pitchBox.value())
+        self.settings.setValue('SLM focus', self.SLM_Controller.focusBox.value())
+        self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
+        self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
 
 
 class mainWindow(QMainWindow):
