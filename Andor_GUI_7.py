@@ -438,11 +438,15 @@ class AcquisitionWidget(QWidget):
         self.AOITopBox = QSpinBox(self)
         self.AOIWidthBox = QSpinBox(self)
         self.AOIHeightBox = QSpinBox(self)
-        self.CenterXBox = QSpinBox(self)
-        self.CenterYBox = QSpinBox(self)
         AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
         for obj in AOIBoxList:
             obj.setMaximum(2048)
+        self.CenterXBox = QSpinBox(self)
+        self.CenterYBox = QSpinBox(self)
+        self.CenterXBox.setMinimum(-1024)
+        self.CenterYBox.setMinimum(-1024)
+        self.CenterXBox.setMaximum(1024)
+        self.CenterYBox.setMaximum(1024)
         self.AOIBinBox = QComboBox(self)
         AOIBinList = ["1x1", "2x2", "3x3", "4x4", "8x8"]
         self.AOIBinBox.addItems(AOIBinList)
@@ -1235,17 +1239,18 @@ class centralWidget(QWidget):
         AOISize = 2048/2**AOISizeIndex
         if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
             logging.error("AOIWidth")
-        if dll.setInt(self.Handle, "AOILeft", int(centerX - AOISize/2)):
+        if dll.setInt(self.Handle, "AOILeft", int(1024 + centerX - AOISize/2)):
             logging.error("AOILeft")
         if dll.SetInt(self.Handle, "AOIHeight", int(AOISize)):
             logging.error("AOIHeight")
-        if dll.setInt(self.Handle, "AOITop", int(centerY - AOISize/2)):
+        if dll.setInt(self.Handle, "AOITop", int(1024 + centerY - AOISize/2)):
             logging.error("AOILeft")
 
     def applySettings(self):
         dll.SetFloat(self.Handle, "Exposure Time", self.acquisitionWidget.exposeTBox.value())
         dll.SetEnumString(self.Handle, "AOIBinning", self.acquisitionWidget.AOIBinBox.currentText())
-        if self.acquisitionWidget.AOISizeBox.currentIndex() == 5:
+        index = self.acquisitionWidget.AOISizeBox.currentIndex()
+        if index == 5:
             if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOIWidthBox.value()):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOILeftBox.value()):
@@ -1254,12 +1259,19 @@ class centralWidget(QWidget):
                 logging.error("AOIHeight")
             if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOITopBox.value()):
                 logging.error("AOITop")
-        else:
-            if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        elif index == 0:
+            if dll.SetInt(self.Handle, "AOIWidth", 2048:
                 logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+            if dll.SetInt(self.Handle, "AOIHeight", 2048):
                 logging.error("AOIHeight")
-            dll.centreAOI(self.Handle)
+        else:
+            self.setAOICenter()
+        # else:
+        #     if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        #         logging.error("AOIWidth")
+        #     if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        #         logging.error("AOIHeight")
+        #     dll.centreAOI(self.Handle)
         dll.SetBool(self.Handle, "RollingShutterGlobalClear", self.acquisitionWidget.globalClearButton.isChecked())
 
         frameRate = ct.c_double(float(self.acquisitionWidget.fixedWidget.frameRateBox.text()))
