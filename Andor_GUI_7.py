@@ -1302,6 +1302,7 @@ class centralWidget(QWidget):
 
     def exportSeries(self):
         dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
+        logging.debug(dirToSave)
         if dirToSave:
             start = self.imageLoader.anlzStartBox.value()
             end = self.imageLoader.anlzEndBox.value()
@@ -1316,7 +1317,7 @@ class centralWidget(QWidget):
                 dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
                                      ct.byref(max), ct.byref(min))
                 img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
-                cv2.imwrite(dirToSave[0]+"/"+str(i)+".bmp")
+                cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
 
 
     def openSettings(self):
@@ -1386,6 +1387,7 @@ class mainWindow(QMainWindow):
         exitAct = QAction('Exit', self)
         exitAct.triggered.connect(self.close)
         fileMenu.addAction(expAct)
+        fileMenu.addAction(expSAct)
         fileMenu.addAction(exitAct)
 
         # self.setGeometry(100, 100, 1200, 800)
