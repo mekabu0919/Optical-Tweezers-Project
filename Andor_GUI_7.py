@@ -878,8 +878,8 @@ class DIOWidget(QGroupBox):
         self.DIObuttons.addButton(self.DIOHighButton)
         self.DIObuttons.addButton(self.DIOLowButton)
         self.DIObuttons.setExclusive(True)
-        self.DIObuttons.setId(self.DIOLowButton, 0)
-        self.DIObuttons.setId(self.DIOHighButton, 1)
+        self.DIObuttons.setId(self.DIOLowButton, 6)
+        self.DIObuttons.setId(self.DIOHighButton, 7)
 
         vbox = QVBoxLayout(self)
         # vbox.addWidget(QLabel('DIO Control'))
@@ -903,8 +903,8 @@ class shutterWidget(QGroupBox):
         self.shutterButtons.addButton(self.openButton)
         self.shutterButtons.addButton(self.closeButton)
         self.shutterButtons.setExclusive(True)
-        self.shutterButtons.setId(self.openButton, 3)
-        self.shutterButtons.setId(self.closeButton, 2)
+        self.shutterButtons.setId(self.openButton, 5)
+        self.shutterButtons.setId(self.closeButton, 4)
 
         vbox = QVBoxLayout(self)
         # vbox.addWidget(QLabel('DIO Control'))
@@ -1035,7 +1035,7 @@ class centralWidget(QWidget):
         self.Handle = ct.c_int()
         self.ref = ct.c_int()
         self.CentralPos = None
-        self.outDIO = [0, 0, 0, 0, 0]
+        self.outDIO = [0, 0, 0, 0, 0, 0]
         self.fin = True
 
         self.openSettings()
@@ -1300,9 +1300,13 @@ class centralWidget(QWidget):
             self.imageLoader.update_img()
 
     def writeDIO(self, signal):
+        # select port from signal
         port = signal // 2
+        # take value (0 or 1) from signal
         val = signal % 2
+        # write value into the index corresponding to port of list
         self.outDIO[-1*port-1] = val
+        # list to strings
         strings = ''.join(map(str, self.outDIO))
         out = int(strings, 2)
         logging.debug(strings)
@@ -1449,4 +1453,5 @@ class mainWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = mainWindow()
+    window.move(20, 20)
     sys.exit(app.exec_())
