@@ -449,11 +449,17 @@ class AcquisitionWidget(QWidget):
         self.contWidget = contWidget(self)
         self.fixedWidget = fixedWidget(self)
 
+        self.AOIWidth = 2048
+        self.AOIHeight = 2048
+
         self.Tab = QTabWidget()
         self.Tab.addTab(self.contWidget, 'Continuous')
         self.Tab.addTab(self.fixedWidget, 'Fixed')
 
         self.initUI()
+        self.AOISizeBox.currentIndexChanged().connect(self.setAOISize)
+        self.AOIWidthBox.currentIndexChanged().connect(self.setAOISize)
+        self.AOIHeightBox.currentIndexChanged().connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -521,6 +527,16 @@ class AcquisitionWidget(QWidget):
         vbox0.addLayout(hbox01)
         vbox0.addWidget(self.Tab)
         vbox0.addLayout(hbox03)
+
+    def setAOISize(self):
+        index = self.AOISizeBox.currentIndex()
+        if  index == 5:
+            self.AOIWidth = self.AOIWidthBox.value()
+            self.AOIHeight = self.AOIHeightBox.value()
+        else:
+            val = 2048/(2**index)
+            self.AOIWidth = val
+            self.AOIHeight = val
 
 
 class imageLoader(QWidget):
