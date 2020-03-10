@@ -1148,7 +1148,7 @@ class centralWidget(QWidget):
 
     def calcDst(self):
         vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
-        *self.MarkerFactor/self.SLM_Controller.pitch
+        *self.MarkerFactor*self.ImgWidget.imageWidget.image.size().width()/self.acquisitionWidget.AOIWidth/self.SLM_Controller.pitch
         markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
         self.markerPos = markerPos.astype(np.uint16).tolist()
         rotation = [np.array([[1,0],[0,1]]), np.array([[0,-1],[1,0]]),
