@@ -457,9 +457,9 @@ class AcquisitionWidget(QWidget):
         self.Tab.addTab(self.fixedWidget, 'Fixed')
 
         self.initUI()
-        self.AOISizeBox.currentIndexChanged().connect(self.setAOISize)
-        self.AOIWidthBox.currentIndexChanged().connect(self.setAOISize)
-        self.AOIHeightBox.currentIndexChanged().connect(self.setAOISize)
+        self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
+        self.AOIWidthBox.valueChanged.connect(self.setAOISize)
+        self.AOIHeightBox.valueChanged.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
