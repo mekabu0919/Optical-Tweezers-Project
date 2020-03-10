@@ -271,6 +271,7 @@ class LHLayout(QHBoxLayout):
 
 
 class OwnImageWidget(QWidget):
+    posSignal = QtCore.pyqtSignal(QtCore.QPoint)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.image = None
@@ -290,24 +291,26 @@ class OwnImageWidget(QWidget):
             qp.drawImage(QtCore.QPoint(0, 0), self.image)
         qp.end()
 
+    def mouseMoveEvent(self, event):
+        self.posSignal.emit(event.pos())
+
 class PosLabeledImageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.point = []
         self.imageWidget = OwnImageWidget(self)
         self.posLabel = QLabel("Position:")
+
+        self.imageWidget.posSignal.connect(self.writeLabel)
 
         vbox = QVBoxLayout(self)
         xbox.addWidget(self.imageWidget)
         vbox.addWidget(self.posLabel)
         vbox.addStretch(1)
 
-        self.setMouseTracking(True)
 
-    def mouseMoveEvent(self, event):
-        self.points = event.pos()
-        self.posLabel.setText(f"Position:[{self.points.x()}, {self.points.y()}]")
+    def writeLabel(self, pos):
+        self.posLabel.setText(f"Position:[{pos.x()}, {pos.y()}]")
         self.update()
 
     def setImage(self, image):
