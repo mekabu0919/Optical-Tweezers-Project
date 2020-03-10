@@ -301,7 +301,6 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget = OwnImageWidget(self)
         self.posLabel = QLabel("Position:")
 
-        self.imageWidget.posSignal.connect(self.writeLabel)
 
         vbox = QVBoxLayout(self)
         vbox.addWidget(self.imageWidget)
@@ -1018,6 +1017,8 @@ class centralWidget(QWidget):
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
+
+        self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
 
         self.processWidget.applyButton.clicked.connect(self.applyProcessClicked)
 
