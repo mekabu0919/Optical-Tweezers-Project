@@ -272,8 +272,9 @@ class LHLayout(QHBoxLayout):
 
 class OwnImageWidget(QWidget):
     def __init__(self, parent=None):
-        super(QWidget, self).__init__(parent)
+        super().__init__(parent)
         self.image = None
+        self.setMouseTracking(True)
         self.setMinimumSize(700, 700)
 
     def setImage(self, image):
@@ -288,6 +289,31 @@ class OwnImageWidget(QWidget):
         if self.image:
             qp.drawImage(QtCore.QPoint(0, 0), self.image)
         qp.end()
+
+class PosLabeledImageWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.point = []
+        self.imageWidget = OwnImageWidget(self)
+        self.posLabel = QLabel("Label")
+
+        VBL = QVBoxLayout(self)
+        VBL.addWidget(self.imageWidget)
+        VBL.addWidget(self.posLabel)
+
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event):
+        self.points = event.pos()
+        self.posLabel.setText(f"[{self.points.x()}, {self.points.y()}]")
+        self.update()
+
+    def def setImage(self, image):
+        self.imageWidget.image = image
+        sz = image.size()
+        self.imageWidget.setMinimumSize(sz)
+        self.update()
 
 
 class SLMWindow(QDialog):
@@ -950,7 +976,7 @@ class centralWidget(QWidget):
         self.imageAcquirer = ImageAcquirer()
         self.imagePlayer = ImagePlayer()
         self.imageProcesser = ImageProcesser()
-        self.ImgWidget = OwnImageWidget(self)
+        self.ImgWidget = PosLabeledImageWidget(self)
         self.SLM_Controller = SLM_Controller(self)
         self.imageLoader = imageLoader(self)
         self.processWidget = processWidget(self)
