@@ -304,7 +304,7 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget.posSignal.connect(self.writeLabel)
 
         vbox = QVBoxLayout(self)
-        xbox.addWidget(self.imageWidget)
+        vbox.addWidget(self.imageWidget)
         vbox.addWidget(self.posLabel)
         vbox.addStretch(1)
 
