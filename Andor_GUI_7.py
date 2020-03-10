@@ -1147,17 +1147,16 @@ class centralWidget(QWidget):
         self.split = check
 
     def calcDst(self):
-        img = self.ImgWidget.imageWidget.image
-        if img is not None:
-            vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
-            *self.MarkerFactor*img.size().width()/self.acquisitionWidget.AOIWidth/self.SLM_Controller.pitch
-            markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
-            self.markerPos = markerPos.astype(np.uint16).tolist()
-            rotation = [np.array([[1,0],[0,1]]), np.array([[0,-1],[1,0]]),
-                        np.array([[-1,0],[0,-1]]), np.array([[0,1],[-1,0]])]
-            for rot, n in zip(rotation, range(4)):
-                dst = markerPos + np.dot(rot, vec)
-                self.dst[n] = dst.astype(np.uint16).tolist()
+        size = max([self.acquisitionWidget.AOIWidth, self.acquisitionWidget.AOIHeight])
+        vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
+        *self.MarkerFactor*600/size/self.SLM_Controller.pitch
+        markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
+        self.markerPos = markerPos.astype(np.uint16).tolist()
+        rotation = [np.array([[1,0],[0,1]]), np.array([[0,-1],[1,0]]),
+                    np.array([[-1,0],[0,-1]]), np.array([[0,1],[-1,0]])]
+        for rot, n in zip(rotation, range(4)):
+            dst = markerPos + np.dot(rot, vec)
+            self.dst[n] = dst.astype(np.uint16).tolist()
 
     def update_frame(self, source):
 
