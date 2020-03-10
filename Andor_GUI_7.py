@@ -296,20 +296,21 @@ class PosLabeledImageWidget(QWidget):
 
         self.point = []
         self.imageWidget = OwnImageWidget(self)
-        self.posLabel = QLabel("Label")
+        self.posLabel = QLabel("Position:")
 
-        VBL = QVBoxLayout(self)
-        VBL.addWidget(self.imageWidget)
-        VBL.addWidget(self.posLabel)
+        vbox = QVBoxLayout(self)
+        xbox.addWidget(self.imageWidget)
+        vbox.addWidget(self.posLabel)
+        vbox.addStretch(1)
 
         self.setMouseTracking(True)
 
     def mouseMoveEvent(self, event):
         self.points = event.pos()
-        self.posLabel.setText(f"[{self.points.x()}, {self.points.y()}]")
+        self.posLabel.setText(f"Position:[{self.points.x()}, {self.points.y()}]")
         self.update()
 
-    def def setImage(self, image):
+    def setImage(self, image):
         self.imageWidget.image = image
         sz = image.size()
         self.imageWidget.setMinimumSize(sz)
