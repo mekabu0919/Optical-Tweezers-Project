@@ -309,15 +309,12 @@ class PosLabeledImageWidget(QWidget):
         vbox.addStretch(1)
 
 
-    def writeLabel(self, pos):
-        self.posLabel.setText(f"Position:[{pos.x()}, {pos.y()}]")
+    def writeLabel(self, string):
+        self.posLabel.setText(string)
         self.update()
 
     def setImage(self, image):
-        self.imageWidget.image = image
-        sz = image.size()
-        self.imageWidget.setMinimumSize(sz)
-        self.update()
+        self.imageWidget.setImage(image)
 
 
 class SLMWindow(QDialog):
@@ -1344,6 +1341,16 @@ class centralWidget(QWidget):
         self.imageLoader.prms = self.processWidget.prmStruct
         if update:
             self.imageLoader.update_img()
+
+    def writeMousePosition(self, pos):
+        if self.ImgWidget.imageWidget.image is not None:
+            x = pos.x()
+            y = pos.y()
+            w = self.ImgWidget.imageWidget.image.size().width()
+            h = self.ImgWidget.imageWidget.image.size().height()
+            realX = x/w*self.acquisitionWidget.AOIWidth
+            realY = y/h*self.acquisitionWidget.AOIHeight
+            self.ImgWidget.writeLabel(f"Position (pix.): [{realX:.3f}, {realY:.3f}]")
 
     def writeDIO(self, signal):
         # select port from signal
