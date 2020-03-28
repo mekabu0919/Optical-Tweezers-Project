@@ -61,6 +61,8 @@ dll.GetInt.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_longlong)]
 dll.SetInt.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_longlong]
 dll.SetEnumString.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_wchar_p]
 dll.GetEnumIndex.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_int)]
+dll.GetEnumCount.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_int)]
+dll.GetEnumStringByIndex.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_int, ct.c_wchar_p, ct.c_int]
 dll.SetFloat.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_double]
 dll.GetFloat.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_double)]
 dll.GetFloatMax.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_double)]
@@ -76,6 +78,10 @@ dll.processImageShow.argtypes = (ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_u
                                  processPrms, ct.POINTER(ct.c_ubyte), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double))
 dll.processImage.argtypes = (ct.POINTER(ct.c_float), ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_ushort), processPrms)
 
+dll.setPiezoServo.argtypes = (ct.c_int, ct.c_int)
+dll.movePiezo.argtypes = (ct.c_int, ct.c_double)
+dll.getPiezoPosition.argtypes = (ct.c_int, ct.POINTER(ct.c_double))
+
 # Class definition for multithreading
 class ImageAcquirer(QtCore.QThread):
 
@@ -88,7 +94,7 @@ class ImageAcquirer(QtCore.QThread):
         self.mutex = QtCore.QMutex()
 
     def setup(self, Handle, dir=None, num=100, count_p=None, center=None,
-              DIOthres=0, DIOhandle=None, fixed=0, mode=0):
+              DIOthres=0, DIOhandle=None, fixed=0, mode=0, piezoID=0):
         self.Handle = Handle
         self.dir = dir
         self.num = num
@@ -100,6 +106,7 @@ class ImageAcquirer(QtCore.QThread):
         self.DIOhandle = DIOhandle
         self.fixed = fixed
         self.mode = mode
+        self.piezoID = piezoID
         self.stopped = False
 
     def stop(self):
@@ -114,8 +121,10 @@ class ImageAcquirer(QtCore.QThread):
                 dll.startFixedAcquisition(self.Handle, self.dir, self.num, self.count_p)
             elif self.mode==1:
                 self.prepareAcquisition()
-            else:
+            elif self.mode==2:
                 self.feedbackedAcquisition()
+            else:
+                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.num, self.count_p, self.piezoID)
         else:
             self.continuousAcquisition()
         self.stop()
@@ -397,8 +406,8 @@ class fixedWidget(QWidget):
         self.aqTypeBox.addItems(aqTypeList)
         self.cntrPosLabel = QLabel("Centre of position:", self)
         self.thresBox = QDoubleSpinBox(self)
-        self.periodButton = QPushButton('Periodic', self)
-        self.periodButton.setCheckable(True)
+        self.specialButton = QPushButton('Special Measurement', self)
+        self.specialButton.setCheckable(True)
         self.repeatBox = QSpinBox(self)
         self.repeatBox.setMinimum(1)
         self.currentRepeatBox = QLineEdit(self)
@@ -422,7 +431,7 @@ class fixedWidget(QWidget):
 
         hbox021 = LHLayout("Repeat: ", self.repeatBox)
         hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.periodButton)
+        hbox02.addWidget(self.specialButton)
         hbox02.addLayout(hbox021)
         hbox02.addWidget(self.currentRepeatBox)
 
@@ -983,6 +992,123 @@ class LogWidget(QGroupBox):
         self.setLayout(vbox)
         self.setTitle("Log")
 
+class TemperatureWidget(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.tempButton = QPushButton('Show Tempereture', self)
+        self.tempStatusButton = QPushButton('Show Status', self)
+        self.sensorCoolingButton = QPushButton('Sensor Cooling', self)
+        self.sensorCoolingButton.setCheckable(True)
+
+        hbox = QHBoxLayout(self)
+        hbox.addWidget(self.tempButton)
+        hbox.addWidget(self.tempStatusButton)
+        hbox.addWidget(self.sensorCoolingButton)
+        self.setTitle("Temperature Control")
+
+class PiezoWidget(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.connectButton = QPushButton('Connect', self)
+        self.servoButton = QPushButton('Servo', self)
+        self.moveButton = QPushButton('Move to', self)
+        self.targetBox = QDoubleSpinBox(self)
+        self.getPosButton = QPushButton('Get Position', self)
+        self.piezoButtons = [self.servoButton, self.moveButton, self.targetBox, self.getPosButton]
+
+        self.connectButton.setCheckable(True)
+        self.servoButton.setCheckable(True)
+
+        self.connectButton.toggled.connect(self.connectPiezo)
+        self.servoButton.toggled.connect(self.setServo)
+        self.moveButton.clicked.connect(self.movePiezo)
+        self.getPosButton.clicked.connect(self.showCurrentPosition)
+
+        for button in self.piezoButtons:
+            button.setDisabled(True)
+
+        hbox = QHBoxLayout(self)
+        hbox.addWidget(self.connectButton)
+        hbox.addWidget(self.servoButton)
+        hbox.addWidget(self.moveButton)
+        hbox.addWidget(self.targetBox)
+        hbox.addWidget(self.getPosButton)
+
+        self.setTitle("Piezo Controller")
+
+    def connectPiezo(self, checked):
+        if checked:
+            self.piezoID = dll.initPiezo()
+            if self.piezoID<0:
+                logging.error("Piezo connection failed")
+                self.connectPiezo.setChecked(False)
+            else:
+                for button in self.piezoButtons:
+                    button.setDisabled(False)
+        else:
+            dll.finPiezo(self.piezoID)
+            for button in self.piezoButtons:
+                button.setDisabled(True)
+
+    def setServo(self, checked):
+        dll.setPiezoServo(self.piezoID, checked)
+
+    def movePiezo(self):
+        target = self.targetBox.value()
+        dll.movePiezo(self.piezoID, target)
+
+    def showCurrentPosition(self):
+        pos = ct.c_double()
+        dll.getPiezoPosition(self.piezoID, ct.byref(pos))
+        logging.info("Current Piezo Position (um):" + str(pos.value))
+
+class SpecialMeasurementDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.start = 0
+        self.end = 0
+        self.step = 0
+        self.num = 0
+        self.piezoCheck = False
+
+        self.piezoCheckBox = QCheckBox("Piezo Measurement", self)
+        self.startBox = QDoubleSpinBox(self)
+        self.endBox = QDoubleSpinBox(self)
+        self.stepBox = QDoubleSpinBox(self)
+        self.stepBox.setDecimals(3)
+        self.numBox = QSpinBox(self)
+
+        self.acceptButton = QPushButton("OK", self)
+        self.rejectButton = QPushButton("Cancel", self)
+
+        self.acceptButton.clicked.connect(self.accept)
+        self.rejectButton.clicked.connect(self.reject)
+
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.acceptButton)
+        hbox.addWidget(self.rejectButton)
+
+        hbox2 = QHBoxLayout()
+        hbox2.addWidget(self.piezoCheckBox)
+        hbox2.addLayout(LHLayout("Start (um)", self.startBox))
+        hbox2.addLayout(LHLayout("End (um)", self.endBox))
+        hbox2.addLayout(LHLayout("Step (um)", self.stepBox))
+        hbox2.addLayout(LHLayout("Number of each condition", self.numBox))
+
+
+        vbox = QVBoxLayout(self)
+        vbox.addLayout(hbox2)
+        vbox.addLayout(hbox)
+
+    def applySettings(self):
+        self.piezoCheck = self.piezoCheckBox.isChecked()
+        self.start = self.startBox.value()
+        self.end = self.endBox.value()
+        self.step = self.stepBox.value()
+        self.num = self.numBox.value()
+        return [self.piezoCheck, self.start, self.end, self.step, self.num]
+
 
 class centralWidget(QWidget):
 
@@ -999,11 +1125,15 @@ class centralWidget(QWidget):
         self.DIOWidget = DIOWidget(self)
         self.shutterWidget = shutterWidget(self)
         self.logWidget = LogWidget(self)
+        self.tempWidget = TemperatureWidget(self)
+        self.piezoWidget = PiezoWidget(self)
         self.acquisitionWidget = AcquisitionWidget(self)
 
         self.modeTab = QTabWidget()
         self.modeTab.addTab(self.acquisitionWidget, 'Image Acquisition')
         self.modeTab.addTab(self.imageLoader, 'Image Load')
+
+        self.specialDialog = SpecialMeasurementDialog()
 
         self.initSignal()
         self.initUI()
@@ -1030,6 +1160,9 @@ class centralWidget(QWidget):
         self.acquisitionWidget.contWidget.markerPositionBoxY.valueChanged.connect(self.moveMarkerY)
         self.acquisitionWidget.contWidget.markerFactorBox.valueChanged.connect(self.factorChanged)
         self.acquisitionWidget.contWidget.splitButton.toggled.connect(self.splitMarker)
+
+        self.acquisitionWidget.fixedWidget.specialButton.toggled.connect(self.setupSpecialMeasurement)
+
         self.acquisitionWidget.initButton.clicked.connect(self.initializeCamera)
         self.acquisitionWidget.finButton.clicked.connect(self.finalizeCamera)
         self.acquisitionWidget.runButton.toggled.connect(self.startAcquisition)
@@ -1037,6 +1170,10 @@ class centralWidget(QWidget):
 
         self.SLM_Controller.pitchBox.valueChanged.connect(self.SLM_pitchChanged)
         self.SLM_Controller.SLMDial.valueChanged.connect(self.SLM_dialChanged)
+
+        self.tempWidget.tempButton.clicked.connect(self.showTemperature)
+        self.tempWidget.tempStatusButton.clicked.connect(self.showTempStatus)
+        self.tempWidget.sensorCoolingButton.toggled.connect(self.sensorCooling)
 
     def initUI(self):
         # sPTab = self.modeTab.sizePolicy()
@@ -1053,18 +1190,26 @@ class centralWidget(QWidget):
         vbox0121.addWidget(self.DIOWidget)
         vbox0121.addWidget(self.shutterWidget)
 
+        vbox0122 = QVBoxLayout()
+        vbox0122.addWidget(self.logWidget)
+        vbox0122.addWidget(self.tempWidget)
+
         hbox012 = QHBoxLayout()
         hbox012.addWidget(self.SLM_Controller)
         hbox012.addLayout(vbox0121)
-        hbox012.addWidget(self.logWidget)
+        hbox012.addLayout(vbox0122)
 
         vbox01 = QVBoxLayout()
         vbox01.addWidget(self.modeTab)
         vbox01.addWidget(self.processWidget)
         vbox01.addLayout(hbox012)
 
+        vbox00 = QVBoxLayout()
+        vbox00.addWidget(self.ImgWidget)
+        vbox00.addWidget(self.piezoWidget)
+
         hbox0 = QHBoxLayout(self)
-        hbox0.addWidget(self.ImgWidget)
+        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
 
     def initVal(self):
@@ -1185,6 +1330,13 @@ class centralWidget(QWidget):
             self.acquisitionWidget.contWidget.imgMaxBox.setText(str(source.max))
             self.acquisitionWidget.contWidget.imgMinBox.setText(str(source.min))
 
+    def setupSpecialMeasurement(self, checked):
+        if checked:
+            if self.specialDialog.exec_():
+                self.specialPrms = self.specialDialog.applySettings()
+                logging.debug(self.specialPrms)
+            else:
+                self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
     def startAcquisition(self, checked):
         if checked:
@@ -1200,33 +1352,62 @@ class centralWidget(QWidget):
                 self.imageAcquirer.start()
 
             elif self.acquisitionWidget.Tab.currentIndex() == 1:
-                if self.acquisitionWidget.fixedWidget.periodButton.isChecked():
-                    mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                    num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                    repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
-                    self.writeDIO(2)
-                    logging.info('Acquisition start')
-                    for i in range(repeat*2):
-                        self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
-                        self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
-                                                 num=ct.c_int(num), count_p=count_p)
-                        self.imageAcquirer.start()
-                        ref = count.value
-                        while not self.imageAcquirer.stopped:
-                            if count.value > (ref + 5):
-                                self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
-                                QApplication.processEvents()
-                                ref = count.value
-                        count = ct.c_int(0)
-                        count_p = ct.pointer(count)
-                        self.writeDIO(3-i%2)
-                        waitTime = time.time()
-                        while True:
-                            now = time.time()
-                            if (now - 3) > waitTime:
-                                break
-                    self.acquisitionWidget.runButton.setChecked(False)
-                    logging.info('Acquisition stopped')
+                if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
+                    if self.specialPrms[0]:
+                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+                        repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
+                        logging.info('Acquisition start')
+                        checked, start, end, step, num = self.specialPrms
+                        positions = np.arange(start, end, step)
+                        for pos in positions:
+                            dll.movePiezo(self.piezoWidget.piezoID, pos)
+                            waitTime = time.time()
+                            while True:
+                                now = time.time()
+                                if (now - 3) > waitTime:
+                                    break
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
+                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                     num=ct.c_int(num), count_p=count_p, mode=3, piezoID=self.piezoWidget.piezoID)
+                            self.imageAcquirer.start()
+                            ref = count.value
+                            while not self.imageAcquirer.stopped:
+                                if count.value > (ref + 5):
+                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                    QApplication.processEvents()
+                                    ref = count.value
+                            count = ct.c_int(0)
+                            count_p = ct.pointer(count)
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
+                    else:
+                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+                        repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
+                        self.writeDIO(2)
+                        logging.info('Acquisition start')
+                        for i in range(repeat*2):
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
+                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                     num=ct.c_int(num), count_p=count_p)
+                            self.imageAcquirer.start()
+                            ref = count.value
+                            while not self.imageAcquirer.stopped:
+                                if count.value > (ref + 5):
+                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                    QApplication.processEvents()
+                                    ref = count.value
+                            count = ct.c_int(0)
+                            count_p = ct.pointer(count)
+                            self.writeDIO(3-i%2)
+                            waitTime = time.time()
+                            while True:
+                                now = time.time()
+                                if (now - 3) > waitTime:
+                                    break
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
                 else:
                     dir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                     num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
@@ -1467,6 +1648,28 @@ class centralWidget(QWidget):
         self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
         self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
 
+    def showTemperature(self):
+        temp = ct.c_double()
+        dll.GetFloat(self.Handle, "SensorTemperature", ct.byref(temp))
+        logging.info(temp.value)
+
+    def showTempStatus(self):
+        status = ct.c_int()
+        dll.GetEnumIndex(self.Handle, "TemperatureStatus", ct.byref(status))
+        statusList = ["Cooler Off", "Stabilised", "Cooling", "Drift", "Not Stabilized", "Fault"]
+        logging.info(f"Temperature Status: "+ statusList[status.value])
+
+    def sensorCooling(self, isChecked):
+        dll.SetBool(self.Handle, "sensorCooling", isChecked)
+
+    def testPiezo(self):
+        ID = dll.initPiezo()
+        dll.setPiezoServo(ID, ct.c_int(True))
+        pos = ct.c_double()
+        uni = np.random.uniform()
+        dll.testPiezo(ID, ct.c_double(6.0+uni), ct.byref(pos))
+        logging.debug("pos: " + str(pos.value))
+        dll.finPiezo(ID)
 
 class mainWindow(QMainWindow):
 
