@@ -933,12 +933,11 @@ class DIOWidget(QGroupBox):
         self.DIObuttons.setId(self.DIOHighButton, 7)
 
         vbox = QVBoxLayout(self)
-        # vbox.addWidget(QLabel('DIO Control'))
         vbox.addWidget(self.DIOHighButton)
         vbox.addWidget(self.DIOLowButton)
 
         self.DIOLowButton.setChecked(True)
-        self.setTitle("DIO Controller")
+        self.setTitle("EOM Controller")
 
 
 class shutterWidget(QGroupBox):
