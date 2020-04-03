@@ -372,14 +372,11 @@ class contWidget(QWidget):
         setListToLayout(hbox00, [QLabel("Raw Image"), LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
         hbox01 = QVBoxLayout()
-        hbox01.addWidget(QLabel("Marker Position"))
-        hbox01.addLayout(LHLayout('x: ', self.markerPositionBoxX))
-        hbox01.addLayout(LHLayout('y: ', self.markerPositionBoxY))
-        hbox01.addLayout(LHLayout('factor: ', [self.markerFactorBox, self.splitButton]))
+        setListToLayout(hbox01, [QLabel("Marker Position"), LHLayout('x: ', self.markerPositionBoxX), \
+                                 LHLayout('y: ', self.markerPositionBoxY), LHLayout('factor: ', [self.markerFactorBox, self.splitButton])])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addLayout(hbox00)
-        hbox0.addLayout(hbox01)
+        setListToLayout(hbox0, [hbox00, hbox01])
         hbox0.setStretch(0, 1)
         hbox0.setStretch(1, 1)
 
@@ -415,25 +412,18 @@ class fixedWidget(QWidget):
 
     def initLayout(self):
         hbox00 = QHBoxLayout()
-        hbox00.addLayout(LHLayout("Frames", self.numImgBox))
-        hbox00.addLayout(LHLayout("Frame Rate", self.frameRateBox))
-        hbox00.addLayout(LHLayout("Directory: ", [self.dirBox, self.dirButton]))
-        hbox00.addLayout(LHLayout("Current Frame", self.countBox))
+        setListToLayout(hbox00, [LHLayout("Frames", self.numImgBox), LHLayout("Frame Rate", self.frameRateBox), \
+                                 LHLayout("Directory: ", [self.dirBox, self.dirButton]), LHLayout("Current Frame", self.countBox)])
 
-        hbox012 = LHLayout("Threshold: ", self.thresBox)
         hbox01 = QHBoxLayout()
-        hbox01.addWidget(self.aqTypeBox)
-        hbox01.addWidget(self.cntrPosLabel)
-        hbox01.addLayout(hbox012)
+        setListToLayout(hbox01, [self.aqTypeBox, self.cntrPosLabel, LHLayout("Threshold: ", self.thresBox)])
 
         hbox02 = QHBoxLayout()
         hbox02.addWidget(self.specialButton)
         hbox02.addWidget(self.currentRepeatBox)
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
+        setListToLayout(vbox0, [hbox00, hbox01, hbox02])
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -449,8 +439,7 @@ class AcquisitionWidget(QWidget):
         self.contWidget = contWidget(self)
         self.fixedWidget = fixedWidget(self)
 
-        self.AOIWidth = 2048
-        self.AOIHeight = 2048
+        self.AOIWidth = self.AOIHeight = 2048
 
         self.Tab = QTabWidget()
         self.Tab.addTab(self.contWidget, 'Continuous')
@@ -502,31 +491,20 @@ class AcquisitionWidget(QWidget):
 
     def initLayout(self):
         hbox00 = QHBoxLayout()
-        hbox00.addLayout(LHLayout("Handle: ", self.handleBox))
-        hbox00.addLayout(LHLayout('Exposure Time (s): ', self.exposeTBox))
-        hbox00.addLayout(LHLayout("Binnng: ", self.AOIBinBox))
-        hbox00.addWidget(self.globalClearButton)
+        setListToLayout(hbox00, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
+                                 LHLayout("Binnng: ", self.AOIBinBox), self.globalClearButton])
 
         hbox01 = QHBoxLayout()
-        hbox01.addLayout(LHLayout("AOI Size: ", self.AOISizeBox))
-        hbox01.addLayout(LHLayout("Top: ", self.AOITopBox))
-        hbox01.addLayout(LHLayout("Left: ", self.AOILeftBox))
-        hbox01.addLayout(LHLayout("Width: ", self.AOIWidthBox))
-        hbox01.addLayout(LHLayout("Height: ", self.AOIHeightBox))
-        hbox01.addLayout(LHLayout("X: ", self.CenterXBox))
-        hbox01.addLayout(LHLayout("Y: ", self.CenterYBox))
+        setListToLayout(hbox01, [LHLayout("AOI Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
+                                 LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
+                                 LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
+                                 LHLayout("Y: ", self.CenterYBox)])
 
         hbox03 = QHBoxLayout()
-        hbox03.addWidget(self.initButton)
-        hbox03.addWidget(self.applyButton)
-        hbox03.addWidget(self.runButton)
-        hbox03.addWidget(self.finButton)
+        setListToLayout(hbox03, [self.initButton, self.applyButton, self.runButton, self.finButton])
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addWidget(self.Tab)
-        vbox0.addLayout(hbox03)
+        setListToLayout(vbox0, [hbox00, hbox01, self.Tab, hbox03])
 
     def setAOISize(self):
         index = self.AOISizeBox.currentIndex()
@@ -594,11 +572,7 @@ class imageLoader(QWidget):
         hbox03.addLayout(LHLayout("End: ", self.anlzEndBox))
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(LHLayout("Directory: ", [self.dirBox, self.dirButton]))
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
-        vbox0.addLayout(hbox03)
-        vbox0.addWidget(self.progressBar)
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), hbox01, hbox02, hbox03, self.progressBar])
 
     def initVal(self):
         self.dirname = None
@@ -633,7 +607,7 @@ class imageLoader(QWidget):
     def update_frame(self):
         img = self.img
         img_height, img_width = img.shape
-        scale_w = float(800) / float(img_width)
+        scale_w = float(600) / float(img_width)
         scale_h = float(600) / float(img_height)
         scale = min([scale_w, scale_h])
 
@@ -714,9 +688,8 @@ class processWidget(QGroupBox):
 
     def initLayout(self):
         hbox000 = QHBoxLayout()
-        hbox000.addWidget(self.normButton)
-        hbox000.addLayout(LHLayout("Min: ", self.normMin))
-        hbox000.addLayout(LHLayout("Max: ", self.normMax))
+        setListToLayout(hbox000, [self.normButton, LHLayout("Min: ", self.normMin),\
+                                  LHLayout("Max: ", self.normMax)])
 
         hbox001 = QHBoxLayout()
         hbox001.addWidget(self.standButton)
@@ -727,26 +700,19 @@ class processWidget(QGroupBox):
         hbox00.addLayout(hbox001)
 
         hbox01 = QHBoxLayout()
-        hbox01.addWidget(self.blurButton)
-        hbox01.addLayout(LHLayout("Kernel size : ", self.blurSize))
-        hbox01.addLayout(LHLayout("Sigma: ", self.blurSigma))
+        setListToLayout(hbox01, [self.blurButton, LHLayout("Kernel size : ", self.blurSize),\
+                                 LHLayout("Sigma: ", self.blurSigma)])
 
         hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.thresButton)
-        hbox02.addLayout(LHLayout("Threshold: ", self.thresVal))
-        hbox02.addLayout(LHLayout("Type: ", self.thresType))
-        hbox02.addWidget(self.OtsuButton)
+        setListToLayout(hbox02, [self.thresButton, LHLayout("Threshold: ", self.thresVal),\
+                        LHLayout("Type: ", self.thresType), self.OtsuButton])
 
         hbox03 = QHBoxLayout()
         hbox03.addWidget(self.contButton)
         hbox03.addLayout(LHLayout("Number to Find: ", self.contNum))
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
-        vbox0.addLayout(hbox03)
-        vbox0.addWidget(self.applyButton)
+        setListToLayout(vbox0, [hbox00, hbox01, hbox02, hbox03, self.applyButton])
 
         # self.setStyleSheet("background-color:white;")
         self.setTitle("Process Settings")
@@ -822,11 +788,7 @@ class SLM_Controller(QGroupBox):
         hbox014.addWidget(self.focusYBox)
 
         vbox01 = QVBoxLayout()
-        vbox01.addLayout(hbox010)
-        vbox01.addLayout(hbox011)
-        vbox01.addLayout(hbox012)
-        vbox01.addLayout(hbox013)
-        vbox01.addLayout(hbox014)
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
 
         hbox0 = QHBoxLayout(self)
         hbox0.addWidget(self.SLMDial)
@@ -952,7 +914,6 @@ class shutterWidget(QGroupBox):
         self.shutterButtons.setId(self.closeButton, 4)
 
         vbox = QVBoxLayout(self)
-        # vbox.addWidget(QLabel('DIO Control'))
         vbox.addWidget(self.openButton)
         vbox.addWidget(self.closeButton)
 
@@ -995,9 +956,8 @@ class TemperatureWidget(QGroupBox):
         self.sensorCoolingButton.setCheckable(True)
 
         hbox = QHBoxLayout(self)
-        hbox.addWidget(self.tempButton)
-        hbox.addWidget(self.tempStatusButton)
-        hbox.addWidget(self.sensorCoolingButton)
+        setListToLayout(hbox, [self.tempButton, self.tempStatusButton, self.sensorCoolingButton])
+
         self.setTitle("Temperature Control")
 
 class PiezoWidget(QGroupBox):
@@ -1022,11 +982,7 @@ class PiezoWidget(QGroupBox):
             button.setDisabled(True)
 
         hbox = QHBoxLayout(self)
-        hbox.addWidget(self.connectButton)
-        hbox.addWidget(self.servoButton)
-        hbox.addWidget(self.moveButton)
-        hbox.addWidget(self.targetBox)
-        hbox.addWidget(self.getPosButton)
+        setListToLayout(hbox, [self.connectButton, self.servoButton, self.moveButton, self.targetBox, self.getPosButton])
 
         self.setTitle("Piezo Controller")
 
@@ -1091,20 +1047,16 @@ class SpecialMeasurementDialog(QDialog):
         hbox.addWidget(self.rejectButton)
 
         hbox2 = QHBoxLayout()
-        hbox2.addWidget(self.piezoCheckBox)
-        hbox2.addLayout(LHLayout("Start (um)", self.startBox))
-        hbox2.addLayout(LHLayout("End (um)", self.endBox))
-        hbox2.addLayout(LHLayout("Step (um)", self.stepBox))
-        hbox2.addLayout(LHLayout("Number of each condition", self.numBox))
+        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um)", self.startBox),\
+                                LHLayout("End (um)", self.endBox), LHLayout("Step (um)", self.stepBox),\
+                                LHLayout("Number of each condition", self.numBox)])
 
         hbox3 = QHBoxLayout()
         hbox3.addWidget(self.repeatCheckBox)
         hbox3.addLayout(LHLayout("Repetition", self.repeatBox))
 
         vbox = QVBoxLayout(self)
-        vbox.addLayout(hbox2)
-        vbox.addLayout(hbox3)
-        vbox.addLayout(hbox)
+        setListToLayout(vbox, [hbox2, hbox3, hbox])
 
     def applySettings(self):
         self.piezoCheck = self.piezoCheckBox.isChecked()
@@ -1184,12 +1136,7 @@ class centralWidget(QWidget):
         self.tempWidget.sensorCoolingButton.toggled.connect(self.sensorCooling)
 
     def initUI(self):
-        # sPTab = self.modeTab.sizePolicy()
-        # sPProc = self.processWidget.sizePolicy()
-        # sPTab.setVerticalStretch(1)
-        # sPProc.setVerticalStretch(1)
-        # self.modeTab.setSizePolicy(sPTab)
-        # self.processWidget.setSizePolicy(sPProc)
+
         self.initLayout()
 
     def initLayout(self):
@@ -1316,7 +1263,7 @@ class centralWidget(QWidget):
         img_height = source.height
         img_width = source.width
         img = source.img
-        scale_w = float(800) / float(img_width)
+        scale_w = float(600) / float(img_width)
         scale_h = float(600) / float(img_height)
         scale = min([scale_w, scale_h])
         if scale == 0:
