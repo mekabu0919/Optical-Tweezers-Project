@@ -1071,12 +1071,18 @@ class SpecialMeasurementDialog(QDialog):
         self.num = 0
         self.piezoCheck = False
 
+        self.repeat = 0
+        self.repeatCheck = False
+
         self.piezoCheckBox = QCheckBox("Piezo Measurement", self)
         self.startBox = QDoubleSpinBox(self)
         self.endBox = QDoubleSpinBox(self)
         self.stepBox = QDoubleSpinBox(self)
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
+
+        self.repeatCheckBox = QCheckBox("Repeated Measurement", self)
+        self.repeatBox = QSpinBox(self)
 
         self.acceptButton = QPushButton("OK", self)
         self.rejectButton = QPushButton("Cancel", self)
@@ -1095,9 +1101,13 @@ class SpecialMeasurementDialog(QDialog):
         hbox2.addLayout(LHLayout("Step (um)", self.stepBox))
         hbox2.addLayout(LHLayout("Number of each condition", self.numBox))
 
+        hbox3 = QHBoxLayout()
+        hbox3.addWidget(self.repeatCheckBox)
+        hbox3.addLayout(LHLayout("Repetition", self.repeatBox))
 
         vbox = QVBoxLayout(self)
         vbox.addLayout(hbox2)
+        vbox.addLayout(hbox3)
         vbox.addLayout(hbox)
 
     def applySettings(self):
@@ -1106,7 +1116,9 @@ class SpecialMeasurementDialog(QDialog):
         self.end = self.endBox.value()
         self.step = self.stepBox.value()
         self.num = self.numBox.value()
-        return [self.piezoCheck, self.start, self.end, self.step, self.num]
+        self.repeatCheck = self.repeatCheckBox.isChecked()
+        self.repeat = self.repeatBox.value()
+        return [self.piezoCheck, self.start, self.end, self.step, self.num, self.repeatCheck, self.repeat]
 
 
 class centralWidget(QWidget):
@@ -1357,7 +1369,7 @@ class centralWidget(QWidget):
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
                         repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
                         logging.info('Acquisition start')
-                        checked, start, end, step, num = self.specialPrms
+                        checked, start, end, step, num, repChecked, rep = self.specialPrms
                         positions = np.arange(start, end, step)
                         for pos in positions:
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
@@ -1383,7 +1395,7 @@ class centralWidget(QWidget):
                     else:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                        repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
+                        checked, start, end, step, num, repChecked, repeat = self.specialPrm
                         self.writeDIO(2)
                         logging.info('Acquisition start')
                         for i in range(repeat*2):
