@@ -22,6 +22,8 @@ os.chdir(os.path.dirname(__file__))
 os.chdir(r'../Andor_dll/Andor_dll')
 # os.chdir(r'Andor_dll\Andor_dll')
 
+# ctypes prototype declaration
+
 class nsPrms(ct.Structure):
     _fields_ = [("norm", ct.c_bool),
                 ("normMax", ct.c_double),
@@ -83,6 +85,7 @@ dll.movePiezo.argtypes = (ct.c_int, ct.c_double)
 dll.getPiezoPosition.argtypes = (ct.c_int, ct.POINTER(ct.c_double))
 
 # Class definition for multithreading
+
 class ImageAcquirer(QtCore.QThread):
 
     posSignal = QtCore.pyqtSignal(float, float)
@@ -93,20 +96,17 @@ class ImageAcquirer(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, Handle, dir=None, num=100, count_p=None, center=None,
-              DIOthres=0, DIOhandle=None, fixed=0, mode=0, piezoID=0):
+    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **prms):
         self.Handle = Handle
         self.dir = dir
-        self.num = num
-        self.count_p = count_p
-        self.center = (ct.c_float*2)(0.0, 0.0)
-        if not(center is None):
-            self.center = (ct.c_float*2)(center[0], center[1])
-        self.DIOthres = ct.c_float(DIOthres)
-        self.DIOhandle = DIOhandle
         self.fixed = fixed
         self.mode = mode
-        self.piezoID = piezoID
+        self.prms = prms
+        if center is None:
+            self.center = (ct.c_float*2)(0.0, 0.0)
+        else:
+            self.center = (ct.c_float*2)(center[0], center[1])
+
         self.stopped = False
 
     def stop(self):
@@ -118,13 +118,13 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisition(self.Handle, self.dir, self.num, self.count_p)
+                dll.startFixedAcquisition(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
             elif self.mode==1:
                 self.prepareAcquisition()
             elif self.mode==2:
                 self.feedbackedAcquisition()
             else:
-                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.num, self.count_p, self.piezoID)
+                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -139,9 +139,7 @@ class ImageAcquirer(QtCore.QThread):
             UserBuffers.append((ct.c_ubyte*ImageSizeBytes.value)())
             dll.QueueBuffer(self.Handle, UserBuffers[i], ct.c_int(ImageSizeBytes.value))
 
-        ImageHeight = ct.c_longlong()
-        ImageWidth = ct.c_longlong()
-        ImageStride = ct.c_longlong()
+        ImageHeight, ImageWidth, ImageStride = ct.c_longlong(), ct.c_longlong(), ct.c_longlong()
 
         dll.GetInt(self.Handle, "AOI Height", ct.byref(ImageHeight))
         dll.GetInt(self.Handle, "AOI Width", ct.byref(ImageWidth))
@@ -155,18 +153,16 @@ class ImageAcquirer(QtCore.QThread):
         BufferSize = ct.c_int()
         outputBuffer = (ct.c_ushort * (ImageWidth.value * ImageHeight.value))()
         outBuffer = (ct.c_ubyte*(ImageWidth.value*ImageHeight.value))()
-        maxVal = ct.c_double()
-        minVal = ct.c_double()
+        maxVal, minVal = ct.c_double(), ct.c_double()
+
         while not self.stopped:
             if dll.WaitBuffer(self.Handle, ct.byref(Buffer), ct.byref(BufferSize), 10000) == 0:
                 ret = dll.convertBuffer(Buffer, outputBuffer, ImageWidth, ImageHeight, ImageStride)
                 dll.processImageShow(ImageHeight, ImageWidth, outputBuffer, self.prms,
                                      outBuffer, ct.byref(maxVal), ct.byref(minVal))
-                self.max = maxVal.value
-                self.min = minVal.value
+                self.max, self.min = maxVal.value, minVal.value
                 self.img = np.array(outBuffer).reshape(ImageHeight.value, ImageWidth.value)
-                self.width = ImageWidth.value
-                self.height = ImageHeight.value
+                self.width, self.height = ImageWidth.value, ImageHeight.value
                 self.imgSignal.emit(self)
                 dll.QueueBuffer(self.Handle, Buffer, BufferSize)
             else:
@@ -181,14 +177,14 @@ class ImageAcquirer(QtCore.QThread):
     def prepareAcquisition(self):
 
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.num, self.count_p, self.prms,
-        point, self.center, self.DIOthres, self.DIOhandle, ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
+        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
         self.posSignal.emit(point[0], point[1])
 
     def feedbackedAcquisition(self):
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.num, self.count_p, self.prms,
-        point, self.center, self.DIOthres, self.DIOhandle, ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
+        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
 
 
 class ImagePlayer(QtCore.QThread):
@@ -223,7 +219,7 @@ class ImagePlayer(QtCore.QThread):
             self.countStepSignal.emit()
 
 
-class ImageProcesser(QtCore.QThread):
+class ImageProcessor(QtCore.QThread):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -266,13 +262,20 @@ class ImageProcesser(QtCore.QThread):
 
 
 # class definition for UI
+
+def setListToLayout(layout, list):
+    for object in list:
+        if isinstance(object, QLayout):
+            layout.addLayout(object)
+        else:
+            layout.addWidget(object)
+
 class LHLayout(QHBoxLayout):
     def __init__(self, label, object, parent=None):
         super(QHBoxLayout, self).__init__(parent)
         self.addWidget(QLabel(label), alignment=Qt.AlignRight)
         if isinstance(object, list):
-            for Widget in object:
-                self.addWidget(Widget)
+            setListToLayout(self, object)
         elif isinstance(object, QLayout):
             self.addLayout(object)
         else:
@@ -303,6 +306,7 @@ class OwnImageWidget(QWidget):
     def mouseMoveEvent(self, event):
         self.posSignal.emit(event.pos())
 
+
 class PosLabeledImageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -310,12 +314,9 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget = OwnImageWidget(self)
         self.posLabel = QLabel("Position:")
 
-
         vbox = QVBoxLayout(self)
-        vbox.addWidget(self.imageWidget)
-        vbox.addWidget(self.posLabel)
+        setListToLayout(vbox, [self.imageWidget, self.posLabel])
         vbox.addStretch(1)
-
 
     def writeLabel(self, string):
         self.posLabel.setText(string)
@@ -368,9 +369,7 @@ class contWidget(QWidget):
     def initLayout(self):
 
         hbox00 = QVBoxLayout()
-        hbox00.addWidget(QLabel("Raw Image"))
-        hbox00.addLayout(LHLayout('Min: ', self.imgMinBox))
-        hbox00.addLayout(LHLayout('Max: ', self.imgMaxBox))
+        setListToLayout(hbox00, [QLabel("Raw Image"), LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
         hbox01 = QVBoxLayout()
         hbox01.addWidget(QLabel("Marker Position"))
@@ -408,8 +407,6 @@ class fixedWidget(QWidget):
         self.thresBox = QDoubleSpinBox(self)
         self.specialButton = QPushButton('Special Measurement', self)
         self.specialButton.setCheckable(True)
-        self.repeatBox = QSpinBox(self)
-        self.repeatBox.setMinimum(1)
         self.currentRepeatBox = QLineEdit(self)
         self.currentRepeatBox.setReadOnly(True)
         self.currentRepeatBox.setSizePolicy(QSizePolicy(5, 0))
@@ -429,10 +426,8 @@ class fixedWidget(QWidget):
         hbox01.addWidget(self.cntrPosLabel)
         hbox01.addLayout(hbox012)
 
-        hbox021 = LHLayout("Repeat: ", self.repeatBox)
         hbox02 = QHBoxLayout()
         hbox02.addWidget(self.specialButton)
-        hbox02.addLayout(hbox021)
         hbox02.addWidget(self.currentRepeatBox)
 
         vbox0 = QVBoxLayout(self)
@@ -1074,15 +1069,16 @@ class SpecialMeasurementDialog(QDialog):
         self.repeat = 0
         self.repeatCheck = False
 
-        self.piezoCheckBox = QCheckBox("Piezo Measurement", self)
+        self.piezoCheckBox = QRadioButton("Piezo Measurement", self)
         self.startBox = QDoubleSpinBox(self)
         self.endBox = QDoubleSpinBox(self)
         self.stepBox = QDoubleSpinBox(self)
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
 
-        self.repeatCheckBox = QCheckBox("Repeated Measurement", self)
+        self.repeatCheckBox = QRadioButton("Repeated Measurement", self)
         self.repeatBox = QSpinBox(self)
+        self.repeatBox.setMinimum(1)
 
         self.acceptButton = QPushButton("OK", self)
         self.rejectButton = QPushButton("Cancel", self)
@@ -1118,7 +1114,8 @@ class SpecialMeasurementDialog(QDialog):
         self.num = self.numBox.value()
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
-        return [self.piezoCheck, self.start, self.end, self.step, self.num, self.repeatCheck, self.repeat]
+        return {"piezoCheck": self.piezoCheck, "start": self.start, "end": self.end,\
+                "step": self.step, "num": self.num, "repeatCheck": self.repeatCheck, "repeat": self.repeat}
 
 
 class centralWidget(QWidget):
@@ -1128,7 +1125,7 @@ class centralWidget(QWidget):
 
         self.imageAcquirer = ImageAcquirer()
         self.imagePlayer = ImagePlayer()
-        self.imageProcesser = ImageProcesser()
+        self.imageProcessor = ImageProcessor()
         self.ImgWidget = PosLabeledImageWidget(self)
         self.SLM_Controller = SLM_Controller(self)
         self.imageLoader = imageLoader(self)
@@ -1345,7 +1342,6 @@ class centralWidget(QWidget):
         if checked:
             if self.specialDialog.exec_():
                 self.specialPrms = self.specialDialog.applySettings()
-                logging.debug(self.specialPrms)
             else:
                 self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
@@ -1364,13 +1360,11 @@ class centralWidget(QWidget):
 
             elif self.acquisitionWidget.Tab.currentIndex() == 1:
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
-                    if self.specialPrms[0]:
+                    if self.specialPrms["piezoCheck"]:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                        repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
+                        num = self.specialPrms["num"]
                         logging.info('Acquisition start')
-                        checked, start, end, step, num, repChecked, rep = self.specialPrms
-                        positions = np.arange(start, end, step)
+                        positions = np.arange(self.specialPrms["start"], self.specialPrms["stop"], self.specialPrms["step"])
                         for pos in positions:
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
@@ -1392,10 +1386,10 @@ class centralWidget(QWidget):
                             count_p = ct.pointer(count)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
-                    else:
+                    elif self.specialPrms["repeatCheck"]:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                        checked, start, end, step, num, repChecked, repeat = self.specialPrm
+                        repeat = self.specialPrms["repeat"]
                         self.writeDIO(2)
                         logging.info('Acquisition start')
                         for i in range(repeat*2):
@@ -1556,7 +1550,6 @@ class centralWidget(QWidget):
         # list to strings
         strings = ''.join(map(str, self.outDIO))
         out = int(strings, 2)
-        logging.debug(strings)
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
 
     def analyzeDatas(self):
@@ -1568,10 +1561,10 @@ class centralWidget(QWidget):
         for i in range(start, end):
             processfiles.append(self.imageLoader.datfiles[i])
         logging.info("setup")
-        self.imageProcesser.setup(processfiles, self.imageLoader.width,
+        self.imageProcessor.setup(processfiles, self.imageLoader.width,
                                   self.imageLoader.height, self.imageLoader.stride,
                                   self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar)
-        self.imageProcesser.run()
+        self.imageProcessor.run()
 
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save')
