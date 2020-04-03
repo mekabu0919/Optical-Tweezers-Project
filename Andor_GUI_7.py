@@ -753,10 +753,16 @@ class SLM_Controller(QGroupBox):
         self.pitchBox = QSpinBox(self)
         self.pitchBox.setMinimum(1)
 
+        self.rotationBox = QSpinBox(self)
+        self.rotationBox.setMaximum(359)
+
         self.SLMDial = QDial(self)
         self.SLMDial.setWrapping(True)
         self.SLMDial.setMaximum(360)
         self.SLMDial.setMinimum(0)
+
+        self.rotationBox.valueChanged[int].connect(self.SLMDial.setValue)
+        self.SLMDial.valueChanged[int].connect(self.rotationBox.setValue)
 
         self.focusBox = QDoubleSpinBox(self)
         self.focusBox.setRange(-3.0, 3.0)
@@ -787,11 +793,16 @@ class SLM_Controller(QGroupBox):
         hbox014.addWidget(self.focusXBox)
         hbox014.addWidget(self.focusYBox)
 
+        vbox00 = QVBoxLayout()
+        vbox00.addStretch()
+        setListToLayout(vbox00, [QLabel("Rotation"), self.SLMDial, self.rotationBox])
+        vbox00.addStretch()
+
         vbox01 = QVBoxLayout()
         setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addWidget(self.SLMDial)
+        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
 
         self.setTitle("SLM Controller")
