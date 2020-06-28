@@ -1322,7 +1322,7 @@ class centralWidget(QWidget):
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
-                        positions = np.arange(self.specialPrms["start"], self.specialPrms["stop"], self.specialPrms["step"])
+                        positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
                         for pos in positions:
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
@@ -1622,7 +1622,7 @@ class centralWidget(QWidget):
         logging.info(f"Temperature Status: "+ statusList[status.value])
 
     def sensorCooling(self, isChecked):
-        dll.SetBool(self.Handle, "sensorCooling", isChecked)
+        dll.SetBool(self.Handle, "SensorCooling", isChecked)
 
     def testPiezo(self):
         ID = dll.initPiezo()
