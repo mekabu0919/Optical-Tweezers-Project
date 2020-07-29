@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import logging
+import socket
 from glob import glob
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import QDir, Qt, QSettings, QTimer
@@ -19,9 +20,12 @@ from matplotlib.backends.backend_qt5agg\
 
 
 os.chdir(os.path.dirname(__file__))
-os.chdir(r'../Andor_dll/Andor_dll')
-# os.chdir(r'Andor_dll\Andor_dll')
+# os.chdir(r'../Andor_dll/Andor_dll')
+os.chdir(r'Andor_dll\Andor_dll')
 
+simMode = True
+if socket.gethostname() == "EXPERIMENT2":
+    simMode = False
 # ctypes prototype declaration
 
 class nsPrms(ct.Structure):
@@ -80,9 +84,10 @@ dll.processImageShow.argtypes = (ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_u
                                  processPrms, ct.POINTER(ct.c_ubyte), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double))
 dll.processImage.argtypes = (ct.POINTER(ct.c_float), ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_ushort), processPrms)
 
-dll.setPiezoServo.argtypes = (ct.c_int, ct.c_int)
-dll.movePiezo.argtypes = (ct.c_int, ct.c_double)
-dll.getPiezoPosition.argtypes = (ct.c_int, ct.POINTER(ct.c_double))
+if not simMode:
+    dll.setPiezoServo.argtypes = (ct.c_int, ct.c_int)
+    dll.movePiezo.argtypes = (ct.c_int, ct.c_double)
+    dll.getPiezoPosition.argtypes = (ct.c_int, ct.POINTER(ct.c_double))
 
 # Class definition for multithreading
 
