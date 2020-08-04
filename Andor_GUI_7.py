@@ -755,7 +755,7 @@ class SLM_Controller(QGroupBox):
         self.wavelengthBox.addItems(("1050nm", "1060nm", "1064nm"))
         self.wavelengthBox.currentIndexChanged.connect(self.wavelengthChanged)
 
-        self.pitchBox = QSpinBox(self)
+        self.pitchBox = QDoubleSpinBox(self)
         self.pitchBox.setMinimum(1)
 
         self.rotationBox = QSpinBox(self)
