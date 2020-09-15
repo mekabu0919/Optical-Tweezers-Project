@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import cv2
 import logging
+import socket
 from glob import glob
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import QDir, Qt, QSettings, QTimer
@@ -17,9 +18,18 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg\
  import FigureCanvasQTAgg as FigureCanvas
 
+# set current directory
+if os.path.dirname(__file__):
+    os.chdir(os.path.dirname(__file__))
 
-os.chdir(os.path.dirname(__file__)+r'\Andor_dll\Andor_dll')
-# os.chdir(r'Andor_dll\Andor_dll')
+simMode = True
+if socket.gethostname() == "EXPERIMENT2":
+    simMode = False
+    os.chdir(r'../Andor_dll/Andor_dll')
+else:
+    os.chdir(r'Andor_dll\Andor_dll')
+
+# ctypes prototype declaration
 
 class nsPrms(ct.Structure):
     _fields_ = [("norm", ct.c_bool),
@@ -53,7 +63,6 @@ class processPrms(ct.Structure):
                 ("thres", thresPrms),
                 ("cont", contPrms)]
 
-
 dll = ct.windll.LoadLibrary(r'..\x64\Release\Andor_dll.dll')
 dll.InitialiseLibrary()
 dll.InitialiseUtilityLibrary()
@@ -61,6 +70,8 @@ dll.GetInt.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_longlong)]
 dll.SetInt.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_longlong]
 dll.SetEnumString.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_wchar_p]
 dll.GetEnumIndex.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_int)]
+dll.GetEnumCount.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_int)]
+dll.GetEnumStringByIndex.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_int, ct.c_wchar_p, ct.c_int]
 dll.SetFloat.argtypes = [ct.c_int, ct.c_wchar_p, ct.c_double]
 dll.GetFloat.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_double)]
 dll.GetFloatMax.argtypes = [ct.c_int, ct.c_wchar_p, ct.POINTER(ct.c_double)]
@@ -76,7 +87,13 @@ dll.processImageShow.argtypes = (ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_u
                                  processPrms, ct.POINTER(ct.c_ubyte), ct.POINTER(ct.c_double), ct.POINTER(ct.c_double))
 dll.processImage.argtypes = (ct.POINTER(ct.c_float), ct.c_longlong, ct.c_longlong, ct.POINTER(ct.c_ushort), processPrms)
 
+if not simMode:
+    dll.setPiezoServo.argtypes = (ct.c_int, ct.c_int)
+    dll.movePiezo.argtypes = (ct.c_int, ct.c_double)
+    dll.getPiezoPosition.argtypes = (ct.c_int, ct.POINTER(ct.c_double))
+
 # Class definition for multithreading
+
 class ImageAcquirer(QtCore.QThread):
 
     posSignal = QtCore.pyqtSignal(float, float)
@@ -87,19 +104,17 @@ class ImageAcquirer(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, Handle, dir=None, num=100, count_p=None, center=None,
-              DIOthres=0, DIOhandle=None, fixed=0, mode=0):
+    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **prms):
         self.Handle = Handle
         self.dir = dir
-        self.num = num
-        self.count_p = count_p
-        self.center = (ct.c_float*2)(0.0, 0.0)
-        if not(center is None):
-            self.center = (ct.c_float*2)(center[0], center[1])
-        self.DIOthres = ct.c_float(DIOthres)
-        self.DIOhandle = DIOhandle
         self.fixed = fixed
         self.mode = mode
+        self.prms = prms
+        if center is None:
+            self.center = (ct.c_float*2)(0.0, 0.0)
+        else:
+            self.center = (ct.c_float*2)(center[0], center[1])
+
         self.stopped = False
 
     def stop(self):
@@ -111,11 +126,13 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisition(self.Handle, self.dir, self.num, self.count_p)
+                dll.startFixedAcquisition(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
             elif self.mode==1:
                 self.prepareAcquisition()
-            else:
+            elif self.mode==2:
                 self.feedbackedAcquisition()
+            else:
+                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -130,9 +147,7 @@ class ImageAcquirer(QtCore.QThread):
             UserBuffers.append((ct.c_ubyte*ImageSizeBytes.value)())
             dll.QueueBuffer(self.Handle, UserBuffers[i], ct.c_int(ImageSizeBytes.value))
 
-        ImageHeight = ct.c_longlong()
-        ImageWidth = ct.c_longlong()
-        ImageStride = ct.c_longlong()
+        ImageHeight, ImageWidth, ImageStride = ct.c_longlong(), ct.c_longlong(), ct.c_longlong()
 
         dll.GetInt(self.Handle, "AOI Height", ct.byref(ImageHeight))
         dll.GetInt(self.Handle, "AOI Width", ct.byref(ImageWidth))
@@ -146,18 +161,16 @@ class ImageAcquirer(QtCore.QThread):
         BufferSize = ct.c_int()
         outputBuffer = (ct.c_ushort * (ImageWidth.value * ImageHeight.value))()
         outBuffer = (ct.c_ubyte*(ImageWidth.value*ImageHeight.value))()
-        maxVal = ct.c_double()
-        minVal = ct.c_double()
+        maxVal, minVal = ct.c_double(), ct.c_double()
+
         while not self.stopped:
             if dll.WaitBuffer(self.Handle, ct.byref(Buffer), ct.byref(BufferSize), 10000) == 0:
                 ret = dll.convertBuffer(Buffer, outputBuffer, ImageWidth, ImageHeight, ImageStride)
                 dll.processImageShow(ImageHeight, ImageWidth, outputBuffer, self.prms,
                                      outBuffer, ct.byref(maxVal), ct.byref(minVal))
-                self.max = maxVal.value
-                self.min = minVal.value
+                self.max, self.min = maxVal.value, minVal.value
                 self.img = np.array(outBuffer).reshape(ImageHeight.value, ImageWidth.value)
-                self.width = ImageWidth.value
-                self.height = ImageHeight.value
+                self.width, self.height = ImageWidth.value, ImageHeight.value
                 self.imgSignal.emit(self)
                 dll.QueueBuffer(self.Handle, Buffer, BufferSize)
             else:
@@ -172,14 +185,14 @@ class ImageAcquirer(QtCore.QThread):
     def prepareAcquisition(self):
 
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.num, self.count_p, self.prms,
-        point, self.center, self.DIOthres, self.DIOhandle, ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
+        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
         self.posSignal.emit(point[0], point[1])
 
     def feedbackedAcquisition(self):
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.num, self.count_p, self.prms,
-        point, self.center, self.DIOthres, self.DIOhandle, ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
+        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
 
 
 class ImagePlayer(QtCore.QThread):
@@ -214,7 +227,7 @@ class ImagePlayer(QtCore.QThread):
             self.countStepSignal.emit()
 
 
-class ImageProcesser(QtCore.QThread):
+class ImageProcessor(QtCore.QThread):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -257,13 +270,20 @@ class ImageProcesser(QtCore.QThread):
 
 
 # class definition for UI
+
+def setListToLayout(layout, list):
+    for object in list:
+        if isinstance(object, QLayout):
+            layout.addLayout(object)
+        else:
+            layout.addWidget(object)
+
 class LHLayout(QHBoxLayout):
     def __init__(self, label, object, parent=None):
         super(QHBoxLayout, self).__init__(parent)
         self.addWidget(QLabel(label), alignment=Qt.AlignRight)
         if isinstance(object, list):
-            for Widget in object:
-                self.addWidget(Widget)
+            setListToLayout(self, object)
         elif isinstance(object, QLayout):
             self.addLayout(object)
         else:
@@ -271,9 +291,11 @@ class LHLayout(QHBoxLayout):
 
 
 class OwnImageWidget(QWidget):
+    posSignal = QtCore.pyqtSignal(QtCore.QPoint)
     def __init__(self, parent=None):
-        super(QWidget, self).__init__(parent)
+        super().__init__(parent)
         self.image = None
+        self.setMouseTracking(True)
         self.setMinimumSize(700, 700)
 
     def setImage(self, image):
@@ -288,6 +310,28 @@ class OwnImageWidget(QWidget):
         if self.image:
             qp.drawImage(QtCore.QPoint(0, 0), self.image)
         qp.end()
+
+    def mouseMoveEvent(self, event):
+        self.posSignal.emit(event.pos())
+
+
+class PosLabeledImageWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.imageWidget = OwnImageWidget(self)
+        self.posLabel = QLabel("Position:")
+
+        vbox = QVBoxLayout(self)
+        setListToLayout(vbox, [self.imageWidget, self.posLabel])
+        vbox.addStretch(1)
+
+    def writeLabel(self, string):
+        self.posLabel.setText(string)
+        self.update()
+
+    def setImage(self, image):
+        self.imageWidget.setImage(image)
 
 
 class SLMWindow(QDialog):
@@ -333,19 +377,14 @@ class contWidget(QWidget):
     def initLayout(self):
 
         hbox00 = QVBoxLayout()
-        hbox00.addWidget(QLabel("Raw Image"))
-        hbox00.addLayout(LHLayout('Min: ', self.imgMinBox))
-        hbox00.addLayout(LHLayout('Max: ', self.imgMaxBox))
+        setListToLayout(hbox00, [QLabel("Raw Image"), LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
         hbox01 = QVBoxLayout()
-        hbox01.addWidget(QLabel("Marker Position"))
-        hbox01.addLayout(LHLayout('x: ', self.markerPositionBoxX))
-        hbox01.addLayout(LHLayout('y: ', self.markerPositionBoxY))
-        hbox01.addLayout(LHLayout('factor: ', [self.markerFactorBox, self.splitButton]))
+        setListToLayout(hbox01, [QLabel("Marker Position"), LHLayout('x: ', self.markerPositionBoxX), \
+                                 LHLayout('y: ', self.markerPositionBoxY), LHLayout('factor: ', [self.markerFactorBox, self.splitButton])])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addLayout(hbox00)
-        hbox0.addLayout(hbox01)
+        setListToLayout(hbox0, [hbox00, hbox01])
         hbox0.setStretch(0, 1)
         hbox0.setStretch(1, 1)
 
@@ -371,10 +410,8 @@ class fixedWidget(QWidget):
         self.aqTypeBox.addItems(aqTypeList)
         self.cntrPosLabel = QLabel("Centre of position:", self)
         self.thresBox = QDoubleSpinBox(self)
-        self.periodButton = QPushButton('Periodic', self)
-        self.periodButton.setCheckable(True)
-        self.repeatBox = QSpinBox(self)
-        self.repeatBox.setMinimum(1)
+        self.specialButton = QPushButton('Special Measurement', self)
+        self.specialButton.setCheckable(True)
         self.currentRepeatBox = QLineEdit(self)
         self.currentRepeatBox.setReadOnly(True)
         self.currentRepeatBox.setSizePolicy(QSizePolicy(5, 0))
@@ -383,27 +420,18 @@ class fixedWidget(QWidget):
 
     def initLayout(self):
         hbox00 = QHBoxLayout()
-        hbox00.addLayout(LHLayout("Frames", self.numImgBox))
-        hbox00.addLayout(LHLayout("Frame Rate", self.frameRateBox))
-        hbox00.addLayout(LHLayout("Directory: ", [self.dirBox, self.dirButton]))
-        hbox00.addLayout(LHLayout("Current Frame", self.countBox))
+        setListToLayout(hbox00, [LHLayout("Frames", self.numImgBox), LHLayout("Frame Rate", self.frameRateBox), \
+                                 LHLayout("Directory: ", [self.dirBox, self.dirButton]), LHLayout("Current Frame", self.countBox)])
 
-        hbox012 = LHLayout("Threshold: ", self.thresBox)
         hbox01 = QHBoxLayout()
-        hbox01.addWidget(self.aqTypeBox)
-        hbox01.addWidget(self.cntrPosLabel)
-        hbox01.addLayout(hbox012)
+        setListToLayout(hbox01, [self.aqTypeBox, self.cntrPosLabel, LHLayout("Threshold: ", self.thresBox)])
 
-        hbox021 = LHLayout("Repeat: ", self.repeatBox)
         hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.periodButton)
-        hbox02.addLayout(hbox021)
+        hbox02.addWidget(self.specialButton)
         hbox02.addWidget(self.currentRepeatBox)
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
+        setListToLayout(vbox0, [hbox00, hbox01, hbox02])
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -419,11 +447,16 @@ class AcquisitionWidget(QWidget):
         self.contWidget = contWidget(self)
         self.fixedWidget = fixedWidget(self)
 
+        self.AOIWidth = self.AOIHeight = 2048
+
         self.Tab = QTabWidget()
         self.Tab.addTab(self.contWidget, 'Continuous')
         self.Tab.addTab(self.fixedWidget, 'Fixed')
 
         self.initUI()
+        self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
+        self.AOIWidthBox.valueChanged.connect(self.setAOISize)
+        self.AOIHeightBox.valueChanged.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -441,6 +474,12 @@ class AcquisitionWidget(QWidget):
         AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
         for obj in AOIBoxList:
             obj.setMaximum(2048)
+        self.CenterXBox = QSpinBox(self)
+        self.CenterYBox = QSpinBox(self)
+        self.CenterXBox.setMinimum(-1024)
+        self.CenterYBox.setMinimum(-1024)
+        self.CenterXBox.setMaximum(1024)
+        self.CenterYBox.setMaximum(1024)
         self.AOIBinBox = QComboBox(self)
         AOIBinList = ["1x1", "2x2", "3x3", "4x4", "8x8"]
         self.AOIBinBox.addItems(AOIBinList)
@@ -460,29 +499,30 @@ class AcquisitionWidget(QWidget):
 
     def initLayout(self):
         hbox00 = QHBoxLayout()
-        hbox00.addLayout(LHLayout("Handle: ", self.handleBox))
-        hbox00.addLayout(LHLayout('Exposure Time (s): ', self.exposeTBox))
-        hbox00.addLayout(LHLayout("Binnng: ", self.AOIBinBox))
-        hbox00.addWidget(self.globalClearButton)
+        setListToLayout(hbox00, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
+                                 LHLayout("Binnng: ", self.AOIBinBox), self.globalClearButton])
 
         hbox01 = QHBoxLayout()
-        hbox01.addLayout(LHLayout("AOI Size: ", self.AOISizeBox))
-        hbox01.addLayout(LHLayout("Top: ", self.AOITopBox))
-        hbox01.addLayout(LHLayout("Left: ", self.AOILeftBox))
-        hbox01.addLayout(LHLayout("Width: ", self.AOIWidthBox))
-        hbox01.addLayout(LHLayout("Height: ", self.AOIHeightBox))
+        setListToLayout(hbox01, [LHLayout("AOI Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
+                                 LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
+                                 LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
+                                 LHLayout("Y: ", self.CenterYBox)])
 
         hbox03 = QHBoxLayout()
-        hbox03.addWidget(self.initButton)
-        hbox03.addWidget(self.applyButton)
-        hbox03.addWidget(self.runButton)
-        hbox03.addWidget(self.finButton)
+        setListToLayout(hbox03, [self.initButton, self.applyButton, self.runButton, self.finButton])
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addWidget(self.Tab)
-        vbox0.addLayout(hbox03)
+        setListToLayout(vbox0, [hbox00, hbox01, self.Tab, hbox03])
+
+    def setAOISize(self):
+        index = self.AOISizeBox.currentIndex()
+        if  index == 5:
+            self.AOIWidth = self.AOIWidthBox.value()
+            self.AOIHeight = self.AOIHeightBox.value()
+        else:
+            val = 2048/(2**index)
+            self.AOIWidth = val
+            self.AOIHeight = val
 
 
 class imageLoader(QWidget):
@@ -540,11 +580,7 @@ class imageLoader(QWidget):
         hbox03.addLayout(LHLayout("End: ", self.anlzEndBox))
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(LHLayout("Directory: ", [self.dirBox, self.dirButton]))
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
-        vbox0.addLayout(hbox03)
-        vbox0.addWidget(self.progressBar)
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), hbox01, hbox02, hbox03, self.progressBar])
 
     def initVal(self):
         self.dirname = None
@@ -579,7 +615,7 @@ class imageLoader(QWidget):
     def update_frame(self):
         img = self.img
         img_height, img_width = img.shape
-        scale_w = float(800) / float(img_width)
+        scale_w = float(600) / float(img_width)
         scale_h = float(600) / float(img_height)
         scale = min([scale_w, scale_h])
 
@@ -660,9 +696,8 @@ class processWidget(QGroupBox):
 
     def initLayout(self):
         hbox000 = QHBoxLayout()
-        hbox000.addWidget(self.normButton)
-        hbox000.addLayout(LHLayout("Min: ", self.normMin))
-        hbox000.addLayout(LHLayout("Max: ", self.normMax))
+        setListToLayout(hbox000, [self.normButton, LHLayout("Min: ", self.normMin),\
+                                  LHLayout("Max: ", self.normMax)])
 
         hbox001 = QHBoxLayout()
         hbox001.addWidget(self.standButton)
@@ -673,26 +708,19 @@ class processWidget(QGroupBox):
         hbox00.addLayout(hbox001)
 
         hbox01 = QHBoxLayout()
-        hbox01.addWidget(self.blurButton)
-        hbox01.addLayout(LHLayout("Kernel size : ", self.blurSize))
-        hbox01.addLayout(LHLayout("Sigma: ", self.blurSigma))
+        setListToLayout(hbox01, [self.blurButton, LHLayout("Kernel size : ", self.blurSize),\
+                                 LHLayout("Sigma: ", self.blurSigma)])
 
         hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.thresButton)
-        hbox02.addLayout(LHLayout("Threshold: ", self.thresVal))
-        hbox02.addLayout(LHLayout("Type: ", self.thresType))
-        hbox02.addWidget(self.OtsuButton)
+        setListToLayout(hbox02, [self.thresButton, LHLayout("Threshold: ", self.thresVal),\
+                        LHLayout("Type: ", self.thresType), self.OtsuButton])
 
         hbox03 = QHBoxLayout()
         hbox03.addWidget(self.contButton)
         hbox03.addLayout(LHLayout("Number to Find: ", self.contNum))
 
         vbox0 = QVBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addLayout(hbox01)
-        vbox0.addLayout(hbox02)
-        vbox0.addLayout(hbox03)
-        vbox0.addWidget(self.applyButton)
+        setListToLayout(vbox0, [hbox00, hbox01, hbox02, hbox03, self.applyButton])
 
         # self.setStyleSheet("background-color:white;")
         self.setTitle("Process Settings")
@@ -727,17 +755,22 @@ class SLM_Controller(QGroupBox):
         self.modulateButton.toggled.connect(self.modulate_SLM)
 
         self.wavelengthBox = QComboBox(self)
-        self.wavelengthBox.addItems(("1053nm", "1064nm"))
+        self.wavelengthBox.addItems(("1050nm", "1060nm", "1064nm"))
         self.wavelengthBox.currentIndexChanged.connect(self.wavelengthChanged)
 
-        self.pitchBox = QSpinBox(self)
+        self.pitchBox = QDoubleSpinBox(self)
         self.pitchBox.setMinimum(1)
-        self.pitchBox.setValue(23)
+
+        self.rotationBox = QSpinBox(self)
+        self.rotationBox.setMaximum(359)
 
         self.SLMDial = QDial(self)
         self.SLMDial.setWrapping(True)
         self.SLMDial.setMaximum(360)
         self.SLMDial.setMinimum(0)
+
+        self.rotationBox.valueChanged[int].connect(self.SLMDial.setValue)
+        self.SLMDial.valueChanged[int].connect(self.rotationBox.setValue)
 
         self.focusBox = QDoubleSpinBox(self)
         self.focusBox.setRange(-3.0, 3.0)
@@ -768,22 +801,24 @@ class SLM_Controller(QGroupBox):
         hbox014.addWidget(self.focusXBox)
         hbox014.addWidget(self.focusYBox)
 
+        vbox00 = QVBoxLayout()
+        vbox00.addStretch()
+        setListToLayout(vbox00, [QLabel("Rotation"), self.SLMDial, self.rotationBox])
+        vbox00.addStretch()
+
         vbox01 = QVBoxLayout()
-        vbox01.addLayout(hbox010)
-        vbox01.addLayout(hbox011)
-        vbox01.addLayout(hbox012)
-        vbox01.addLayout(hbox013)
-        vbox01.addLayout(hbox014)
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addWidget(self.SLMDial)
+        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
 
         self.setTitle("SLM Controller")
 
     def initVal(self):
-        self.correctImg = [r'..\..\CAL_LSH0701554_1050nm.bmp', r'..\..\CAL_LSH0701554_1060nm.bmp']
-        self.alphaList = [214, 216]
+        self.correctImg = [r'CorrectImages\CAL_LSH0701554_1050nm.bmp', \
+        r'CorrectImages\CAL_LSH0701554_1060nm.bmp', r'CorrectImages\CAL_LSH0701554_1064nm.bmp']
+        self.alphaList = [214, 216, 217]
         self.correction = cv2.imread(self.correctImg[0], 0)
         self.alpha = self.alphaList[0]
         self.base = self.correction
@@ -870,16 +905,15 @@ class DIOWidget(QGroupBox):
         self.DIObuttons.addButton(self.DIOHighButton)
         self.DIObuttons.addButton(self.DIOLowButton)
         self.DIObuttons.setExclusive(True)
-        self.DIObuttons.setId(self.DIOLowButton, 0)
-        self.DIObuttons.setId(self.DIOHighButton, 1)
+        self.DIObuttons.setId(self.DIOLowButton, 6)
+        self.DIObuttons.setId(self.DIOHighButton, 7)
 
         vbox = QVBoxLayout(self)
-        # vbox.addWidget(QLabel('DIO Control'))
         vbox.addWidget(self.DIOHighButton)
         vbox.addWidget(self.DIOLowButton)
 
         self.DIOLowButton.setChecked(True)
-        self.setTitle("DIO Controller")
+        self.setTitle("EOM Controller")
 
 
 class shutterWidget(QGroupBox):
@@ -895,11 +929,10 @@ class shutterWidget(QGroupBox):
         self.shutterButtons.addButton(self.openButton)
         self.shutterButtons.addButton(self.closeButton)
         self.shutterButtons.setExclusive(True)
-        self.shutterButtons.setId(self.openButton, 3)
-        self.shutterButtons.setId(self.closeButton, 2)
+        self.shutterButtons.setId(self.openButton, 5)
+        self.shutterButtons.setId(self.closeButton, 4)
 
         vbox = QVBoxLayout(self)
-        # vbox.addWidget(QLabel('DIO Control'))
         vbox.addWidget(self.openButton)
         vbox.addWidget(self.closeButton)
 
@@ -933,6 +966,128 @@ class LogWidget(QGroupBox):
         self.setLayout(vbox)
         self.setTitle("Log")
 
+class TemperatureWidget(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.tempButton = QPushButton('Show Tempereture', self)
+        self.tempStatusButton = QPushButton('Show Status', self)
+        self.sensorCoolingButton = QPushButton('Sensor Cooling', self)
+        self.sensorCoolingButton.setCheckable(True)
+
+        hbox = QHBoxLayout(self)
+        setListToLayout(hbox, [self.tempButton, self.tempStatusButton, self.sensorCoolingButton])
+
+        self.setTitle("Temperature Control")
+
+class PiezoWidget(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.connectButton = QPushButton('Connect', self)
+        self.servoButton = QPushButton('Servo', self)
+        self.moveButton = QPushButton('Move to', self)
+        self.targetBox = QDoubleSpinBox(self)
+        self.getPosButton = QPushButton('Get Position', self)
+        self.piezoButtons = [self.servoButton, self.moveButton, self.targetBox, self.getPosButton]
+
+        self.connectButton.setCheckable(True)
+        self.servoButton.setCheckable(True)
+
+        self.connectButton.toggled.connect(self.connectPiezo)
+        self.servoButton.toggled.connect(self.setServo)
+        self.moveButton.clicked.connect(self.movePiezo)
+        self.getPosButton.clicked.connect(self.showCurrentPosition)
+
+        for button in self.piezoButtons:
+            button.setDisabled(True)
+
+        hbox = QHBoxLayout(self)
+        setListToLayout(hbox, [self.connectButton, self.servoButton, self.moveButton, self.targetBox, self.getPosButton])
+
+        self.setTitle("Piezo Controller")
+
+    def connectPiezo(self, checked):
+        if checked:
+            self.piezoID = dll.initPiezo()
+            if self.piezoID<0:
+                logging.error("Piezo connection failed")
+                self.connectPiezo.setChecked(False)
+            else:
+                for button in self.piezoButtons:
+                    button.setDisabled(False)
+        else:
+            dll.finPiezo(self.piezoID)
+            for button in self.piezoButtons:
+                button.setDisabled(True)
+
+    def setServo(self, checked):
+        dll.setPiezoServo(self.piezoID, checked)
+
+    def movePiezo(self):
+        target = self.targetBox.value()
+        dll.movePiezo(self.piezoID, target)
+
+    def showCurrentPosition(self):
+        pos = ct.c_double()
+        dll.getPiezoPosition(self.piezoID, ct.byref(pos))
+        logging.info("Current Piezo Position (um):" + str(pos.value))
+
+class SpecialMeasurementDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.start = 0
+        self.end = 0
+        self.step = 0
+        self.num = 0
+        self.piezoCheck = False
+
+        self.repeat = 0
+        self.repeatCheck = False
+
+        self.piezoCheckBox = QRadioButton("Piezo Measurement", self)
+        self.startBox = QDoubleSpinBox(self)
+        self.endBox = QDoubleSpinBox(self)
+        self.stepBox = QDoubleSpinBox(self)
+        self.stepBox.setDecimals(3)
+        self.numBox = QSpinBox(self)
+
+        self.repeatCheckBox = QRadioButton("Repeated Measurement", self)
+        self.repeatBox = QSpinBox(self)
+        self.repeatBox.setMinimum(1)
+
+        self.acceptButton = QPushButton("OK", self)
+        self.rejectButton = QPushButton("Cancel", self)
+
+        self.acceptButton.clicked.connect(self.accept)
+        self.rejectButton.clicked.connect(self.reject)
+
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.acceptButton)
+        hbox.addWidget(self.rejectButton)
+
+        hbox2 = QHBoxLayout()
+        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um)", self.startBox),\
+                                LHLayout("End (um)", self.endBox), LHLayout("Step (um)", self.stepBox),\
+                                LHLayout("Number of each condition", self.numBox)])
+
+        hbox3 = QHBoxLayout()
+        hbox3.addWidget(self.repeatCheckBox)
+        hbox3.addLayout(LHLayout("Repetition", self.repeatBox))
+
+        vbox = QVBoxLayout(self)
+        setListToLayout(vbox, [hbox2, hbox3, hbox])
+
+    def applySettings(self):
+        self.piezoCheck = self.piezoCheckBox.isChecked()
+        self.start = self.startBox.value()
+        self.end = self.endBox.value()
+        self.step = self.stepBox.value()
+        self.num = self.numBox.value()
+        self.repeatCheck = self.repeatCheckBox.isChecked()
+        self.repeat = self.repeatBox.value()
+        return {"piezoCheck": self.piezoCheck, "start": self.start, "end": self.end,\
+                "step": self.step, "num": self.num, "repeatCheck": self.repeatCheck, "repeat": self.repeat}
+
 
 class centralWidget(QWidget):
 
@@ -941,19 +1096,23 @@ class centralWidget(QWidget):
 
         self.imageAcquirer = ImageAcquirer()
         self.imagePlayer = ImagePlayer()
-        self.imageProcesser = ImageProcesser()
-        self.ImgWidget = OwnImageWidget(self)
+        self.imageProcessor = ImageProcessor()
+        self.ImgWidget = PosLabeledImageWidget(self)
         self.SLM_Controller = SLM_Controller(self)
         self.imageLoader = imageLoader(self)
         self.processWidget = processWidget(self)
         self.DIOWidget = DIOWidget(self)
         self.shutterWidget = shutterWidget(self)
         self.logWidget = LogWidget(self)
+        self.tempWidget = TemperatureWidget(self)
+        self.piezoWidget = PiezoWidget(self)
         self.acquisitionWidget = AcquisitionWidget(self)
 
         self.modeTab = QTabWidget()
         self.modeTab.addTab(self.acquisitionWidget, 'Image Acquisition')
         self.modeTab.addTab(self.imageLoader, 'Image Load')
+
+        self.specialDialog = SpecialMeasurementDialog()
 
         self.initSignal()
         self.initUI()
@@ -968,6 +1127,8 @@ class centralWidget(QWidget):
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
 
+        self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
+
         self.processWidget.applyButton.clicked.connect(self.applyProcessClicked)
 
         self.DIOWidget.DIObuttons.buttonClicked[int].connect(self.writeDIO)
@@ -978,6 +1139,9 @@ class centralWidget(QWidget):
         self.acquisitionWidget.contWidget.markerPositionBoxY.valueChanged.connect(self.moveMarkerY)
         self.acquisitionWidget.contWidget.markerFactorBox.valueChanged.connect(self.factorChanged)
         self.acquisitionWidget.contWidget.splitButton.toggled.connect(self.splitMarker)
+
+        self.acquisitionWidget.fixedWidget.specialButton.toggled.connect(self.setupSpecialMeasurement)
+
         self.acquisitionWidget.initButton.clicked.connect(self.initializeCamera)
         self.acquisitionWidget.finButton.clicked.connect(self.finalizeCamera)
         self.acquisitionWidget.runButton.toggled.connect(self.startAcquisition)
@@ -986,13 +1150,12 @@ class centralWidget(QWidget):
         self.SLM_Controller.pitchBox.valueChanged.connect(self.SLM_pitchChanged)
         self.SLM_Controller.SLMDial.valueChanged.connect(self.SLM_dialChanged)
 
+        self.tempWidget.tempButton.clicked.connect(self.showTemperature)
+        self.tempWidget.tempStatusButton.clicked.connect(self.showTempStatus)
+        self.tempWidget.sensorCoolingButton.toggled.connect(self.sensorCooling)
+
     def initUI(self):
-        # sPTab = self.modeTab.sizePolicy()
-        # sPProc = self.processWidget.sizePolicy()
-        # sPTab.setVerticalStretch(1)
-        # sPProc.setVerticalStretch(1)
-        # self.modeTab.setSizePolicy(sPTab)
-        # self.processWidget.setSizePolicy(sPProc)
+
         self.initLayout()
 
     def initLayout(self):
@@ -1001,18 +1164,26 @@ class centralWidget(QWidget):
         vbox0121.addWidget(self.DIOWidget)
         vbox0121.addWidget(self.shutterWidget)
 
+        vbox0122 = QVBoxLayout()
+        vbox0122.addWidget(self.logWidget)
+        vbox0122.addWidget(self.tempWidget)
+
         hbox012 = QHBoxLayout()
         hbox012.addWidget(self.SLM_Controller)
         hbox012.addLayout(vbox0121)
-        hbox012.addWidget(self.logWidget)
+        hbox012.addLayout(vbox0122)
 
         vbox01 = QVBoxLayout()
         vbox01.addWidget(self.modeTab)
         vbox01.addWidget(self.processWidget)
         vbox01.addLayout(hbox012)
 
+        vbox00 = QVBoxLayout()
+        vbox00.addWidget(self.ImgWidget)
+        vbox00.addWidget(self.piezoWidget)
+
         hbox0 = QHBoxLayout(self)
-        hbox0.addWidget(self.ImgWidget)
+        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
 
     def initVal(self):
@@ -1027,7 +1198,7 @@ class centralWidget(QWidget):
         self.Handle = ct.c_int()
         self.ref = ct.c_int()
         self.CentralPos = None
-        self.outDIO = [0, 0, 0, 0, 0]
+        self.outDIO = [0, 0, 0, 0, 0, 0]
         self.fin = True
 
         self.openSettings()
@@ -1095,8 +1266,9 @@ class centralWidget(QWidget):
         self.split = check
 
     def calcDst(self):
+        size = max([self.acquisitionWidget.AOIWidth, self.acquisitionWidget.AOIHeight])
         vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
-        *self.MarkerFactor/self.SLM_Controller.pitch
+        *self.MarkerFactor*600/size/self.SLM_Controller.pitch
         markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
         self.markerPos = markerPos.astype(np.uint16).tolist()
         rotation = [np.array([[1,0],[0,1]]), np.array([[0,-1],[1,0]]),
@@ -1110,7 +1282,7 @@ class centralWidget(QWidget):
         img_height = source.height
         img_width = source.width
         img = source.img
-        scale_w = float(800) / float(img_width)
+        scale_w = float(600) / float(img_width)
         scale_h = float(600) / float(img_height)
         scale = min([scale_w, scale_h])
         if scale == 0:
@@ -1132,6 +1304,12 @@ class centralWidget(QWidget):
             self.acquisitionWidget.contWidget.imgMaxBox.setText(str(source.max))
             self.acquisitionWidget.contWidget.imgMinBox.setText(str(source.min))
 
+    def setupSpecialMeasurement(self, checked):
+        if checked:
+            if self.specialDialog.exec_():
+                self.specialPrms = self.specialDialog.applySettings()
+            else:
+                self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
     def startAcquisition(self, checked):
         if checked:
@@ -1147,33 +1325,60 @@ class centralWidget(QWidget):
                 self.imageAcquirer.start()
 
             elif self.acquisitionWidget.Tab.currentIndex() == 1:
-                if self.acquisitionWidget.fixedWidget.periodButton.isChecked():
-                    mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                    num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                    repeat = self.acquisitionWidget.fixedWidget.repeatBox.value()
-                    self.writeDIO(2)
-                    logging.info('Acquisition start')
-                    for i in range(repeat*2):
-                        self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
-                        self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
-                                                 num=ct.c_int(num), count_p=count_p)
-                        self.imageAcquirer.start()
-                        ref = count.value
-                        while not self.imageAcquirer.stopped:
-                            if count.value > (ref + 5):
-                                self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
-                                QApplication.processEvents()
-                                ref = count.value
-                        count = ct.c_int(0)
-                        count_p = ct.pointer(count)
-                        self.writeDIO(3-i%2)
-                        waitTime = time.time()
-                        while True:
-                            now = time.time()
-                            if (now - 3) > waitTime:
-                                break
-                    self.acquisitionWidget.runButton.setChecked(False)
-                    logging.info('Acquisition stopped')
+                if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
+                    if self.specialPrms["piezoCheck"]:
+                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                        num = self.specialPrms["num"]
+                        logging.info('Acquisition start')
+                        positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        for pos in positions:
+                            dll.movePiezo(self.piezoWidget.piezoID, pos)
+                            waitTime = time.time()
+                            while True:
+                                now = time.time()
+                                if (now - 3) > waitTime:
+                                    break
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
+                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                     num=ct.c_int(num), count_p=count_p, mode=3, piezoID=self.piezoWidget.piezoID)
+                            self.imageAcquirer.start()
+                            ref = count.value
+                            while not self.imageAcquirer.stopped:
+                                if count.value > (ref + 5):
+                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                    QApplication.processEvents()
+                                    ref = count.value
+                            count = ct.c_int(0)
+                            count_p = ct.pointer(count)
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
+                    elif self.specialPrms["repeatCheck"]:
+                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+                        repeat = self.specialPrms["repeat"]
+                        self.writeDIO(2)
+                        logging.info('Acquisition start')
+                        for i in range(repeat*2):
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
+                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                     num=ct.c_int(num), count_p=count_p)
+                            self.imageAcquirer.start()
+                            ref = count.value
+                            while not self.imageAcquirer.stopped:
+                                if count.value > (ref + 5):
+                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                    QApplication.processEvents()
+                                    ref = count.value
+                            count = ct.c_int(0)
+                            count_p = ct.pointer(count)
+                            self.writeDIO(3-i%2)
+                            waitTime = time.time()
+                            while True:
+                                now = time.time()
+                                if (now - 3) > waitTime:
+                                    break
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
                 else:
                     dir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                     num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
@@ -1224,11 +1429,25 @@ class centralWidget(QWidget):
         self.acquisitionWidget.runButton.setChecked(False)
         self.acquisitionWidget.fixedWidget.cntrPosLabel.setText("Center of position: ({:.2f}, {:.2f})".format(self.CentralPos[0], self.CentralPos[1]))
 
+    def setAOICenter(self):
+        centerX = self.acquisitionWidget.CenterXBox.value()
+        centerY = self.acquisitionWidget.CenterYBox.value()
+        AOISizeIndex = self.acquisitionWidget.AOISizeBox.currentIndex()
+        AOISize = 2048/2**AOISizeIndex
+        if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
+            logging.error("AOIWidth")
+        if dll.SetInt(self.Handle, "AOILeft", int(1024 + centerX - AOISize/2)):
+            logging.error("AOILeft")
+        if dll.SetInt(self.Handle, "AOIHeight", int(AOISize)):
+            logging.error("AOIHeight")
+        if dll.SetInt(self.Handle, "AOITop", int(1024 + centerY - AOISize/2)):
+            logging.error("AOILeft")
 
     def applySettings(self):
         dll.SetFloat(self.Handle, "Exposure Time", self.acquisitionWidget.exposeTBox.value())
         dll.SetEnumString(self.Handle, "AOIBinning", self.acquisitionWidget.AOIBinBox.currentText())
-        if self.acquisitionWidget.AOISizeBox.currentIndex() == 5:
+        index = self.acquisitionWidget.AOISizeBox.currentIndex()
+        if index == 5:
             if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOIWidthBox.value()):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOILeftBox.value()):
@@ -1237,12 +1456,19 @@ class centralWidget(QWidget):
                 logging.error("AOIHeight")
             if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOITopBox.value()):
                 logging.error("AOITop")
-        else:
-            if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        elif index == 0:
+            if dll.SetInt(self.Handle, "AOIWidth", 2048):
                 logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+            if dll.SetInt(self.Handle, "AOIHeight", 2048):
                 logging.error("AOIHeight")
-            dll.centreAOI(self.Handle)
+        else:
+            self.setAOICenter()
+        # else:
+        #     if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        #         logging.error("AOIWidth")
+        #     if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
+        #         logging.error("AOIHeight")
+        #     dll.centreAOI(self.Handle)
         dll.SetBool(self.Handle, "RollingShutterGlobalClear", self.acquisitionWidget.globalClearButton.isChecked())
 
         frameRate = ct.c_double(float(self.acquisitionWidget.fixedWidget.frameRateBox.text()))
@@ -1270,13 +1496,26 @@ class centralWidget(QWidget):
         if update:
             self.imageLoader.update_img()
 
+    def writeMousePosition(self, pos):
+        if self.ImgWidget.imageWidget.image is not None:
+            x = pos.x()
+            y = pos.y()
+            w = self.ImgWidget.imageWidget.image.size().width()
+            h = self.ImgWidget.imageWidget.image.size().height()
+            realX = x/w*self.acquisitionWidget.AOIWidth
+            realY = y/h*self.acquisitionWidget.AOIHeight
+            self.ImgWidget.writeLabel(f"Position (pix.): [{realX:.3f}, {realY:.3f}]")
+
     def writeDIO(self, signal):
+        # select port from signal
         port = signal // 2
+        # take value (0 or 1) from signal
         val = signal % 2
+        # write value into the index corresponding to port of list
         self.outDIO[-1*port-1] = val
+        # list to strings
         strings = ''.join(map(str, self.outDIO))
         out = int(strings, 2)
-        logging.debug(strings)
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
 
     def analyzeDatas(self):
@@ -1288,16 +1527,36 @@ class centralWidget(QWidget):
         for i in range(start, end):
             processfiles.append(self.imageLoader.datfiles[i])
         logging.info("setup")
-        self.imageProcesser.setup(processfiles, self.imageLoader.width,
+        self.imageProcessor.setup(processfiles, self.imageLoader.width,
                                   self.imageLoader.height, self.imageLoader.stride,
                                   self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar)
-        self.imageProcesser.run()
+        self.imageProcessor.run()
 
     def exportBMP(self):
-        fileToSave = QFileDialog.getSaveFileName(self, 'File to save')
-        logging.info(fileToSave)
+        fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
+        logging.info("Save picture: "+fileToSave[0])
         if fileToSave:
             cv2.imwrite(fileToSave[0], self.imageLoader.img)
+
+    def exportSeries(self):
+        dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
+        logging.debug(dirToSave)
+        if dirToSave:
+            start = self.imageLoader.anlzStartBox.value()
+            end = self.imageLoader.anlzEndBox.value()
+            for i in range(start, end):
+                rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
+                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+                outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
+                max = ct.c_double()
+                min = ct.c_double()
+                ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
+                                     ct.byref(max), ct.byref(min))
+                img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
+
 
     def openSettings(self):
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1319,9 +1578,16 @@ class centralWidget(QWidget):
         self.acquisitionWidget.AOITopBox.setValue(settings.value('AOI top', type=int))
         self.acquisitionWidget.AOIWidthBox.setValue(settings.value('AOI width', type=int))
         self.acquisitionWidget.AOIHeightBox.setValue(settings.value('AOI height', type=int))
+        self.acquisitionWidget.CenterXBox.setValue(settings.value('Center X', type=int))
+        self.acquisitionWidget.CenterYBox.setValue(settings.value('Center Y', type=int))
         self.acquisitionWidget.fixedWidget.thresBox.setValue(settings.value('DIO threshold', type=float))
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
+        self.SLM_Controller.wavelengthBox.setCurrentIndex(settings.value('SLM wavelength', type=int))
+        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=int))
+        self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
+        self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
+        self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
 
     def writeSettings(self):  # Save current settings
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1341,10 +1607,39 @@ class centralWidget(QWidget):
         self.settings.setValue('AOI top', self.acquisitionWidget.AOITopBox.value())
         self.settings.setValue('AOI width', self.acquisitionWidget.AOIWidthBox.value())
         self.settings.setValue('AOI height', self.acquisitionWidget.AOIHeightBox.value())
+        self.settings.setValue('Center X', self.acquisitionWidget.CenterXBox.value())
+        self.settings.setValue('Center Y', self.acquisitionWidget.CenterYBox.value())
         self.settings.setValue('DIO threshold', self.acquisitionWidget.fixedWidget.thresBox.value())
         self.settings.setValue('marker factor', self.acquisitionWidget.contWidget.markerFactorBox.value())
         self.settings.setValue('dir image', self.imageLoader.dirname)
+        self.settings.setValue('SLM wavelength', self.SLM_Controller.wavelengthBox.currentIndex())
+        self.settings.setValue('SLM pitch', self.SLM_Controller.pitchBox.value())
+        self.settings.setValue('SLM focus', self.SLM_Controller.focusBox.value())
+        self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
+        self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
 
+    def showTemperature(self):
+        temp = ct.c_double()
+        dll.GetFloat(self.Handle, "SensorTemperature", ct.byref(temp))
+        logging.info(temp.value)
+
+    def showTempStatus(self):
+        status = ct.c_int()
+        dll.GetEnumIndex(self.Handle, "TemperatureStatus", ct.byref(status))
+        statusList = ["Cooler Off", "Stabilised", "Cooling", "Drift", "Not Stabilized", "Fault"]
+        logging.info(f"Temperature Status: "+ statusList[status.value])
+
+    def sensorCooling(self, isChecked):
+        dll.SetBool(self.Handle, "SensorCooling", isChecked)
+
+    def testPiezo(self):
+        ID = dll.initPiezo()
+        dll.setPiezoServo(ID, ct.c_int(True))
+        pos = ct.c_double()
+        uni = np.random.uniform()
+        dll.testPiezo(ID, ct.c_double(6.0+uni), ct.byref(pos))
+        logging.debug("pos: " + str(pos.value))
+        dll.finPiezo(ID)
 
 class mainWindow(QMainWindow):
 
@@ -1361,9 +1656,12 @@ class mainWindow(QMainWindow):
 
         expAct = QAction('Export img', self)
         expAct.triggered.connect(self.central.exportBMP)
+        expSAct = QAction('Export image series', self)
+        expSAct.triggered.connect(self.central.exportSeries)
         exitAct = QAction('Exit', self)
         exitAct.triggered.connect(self.close)
         fileMenu.addAction(expAct)
+        fileMenu.addAction(expSAct)
         fileMenu.addAction(exitAct)
 
         # self.setGeometry(100, 100, 1200, 800)
@@ -1383,4 +1681,5 @@ class mainWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = mainWindow()
+    window.move(20, 20)
     sys.exit(app.exec_())
