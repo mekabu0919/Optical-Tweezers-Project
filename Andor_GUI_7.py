@@ -18,14 +18,17 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg\
  import FigureCanvasQTAgg as FigureCanvas
 
-
-os.chdir(os.path.dirname(__file__))
-os.chdir(r'../Andor_dll/Andor_dll')
-# os.chdir(r'Andor_dll\Andor_dll')
+# set current directory
+if os.path.dirname(__file__):
+    os.chdir(os.path.dirname(__file__))
 
 simMode = True
 if socket.gethostname() == "EXPERIMENT2":
     simMode = False
+    os.chdir(r'../Andor_dll/Andor_dll')
+else:
+    os.chdir(r'Andor_dll\Andor_dll')
+
 # ctypes prototype declaration
 
 class nsPrms(ct.Structure):
@@ -1530,8 +1533,8 @@ class centralWidget(QWidget):
         self.imageProcessor.run()
 
     def exportBMP(self):
-        fileToSave = QFileDialog.getSaveFileName(self, 'File to save')
-        logging.info(fileToSave)
+        fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
+        logging.info("Save picture: "+fileToSave[0])
         if fileToSave:
             cv2.imwrite(fileToSave[0], self.imageLoader.img)
 
@@ -1581,7 +1584,7 @@ class centralWidget(QWidget):
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
         self.SLM_Controller.wavelengthBox.setCurrentIndex(settings.value('SLM wavelength', type=int))
-        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=float))
+        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=int))
         self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
         self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
         self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
