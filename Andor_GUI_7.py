@@ -1584,7 +1584,7 @@ class centralWidget(QWidget):
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
         self.SLM_Controller.wavelengthBox.setCurrentIndex(settings.value('SLM wavelength', type=int))
-        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=int))
+        self.SLM_Controller.pitchBox.setValue(settings.value('SLM pitch', 23, type=float))
         self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
         self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
         self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
