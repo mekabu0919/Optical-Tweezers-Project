@@ -126,7 +126,7 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisition(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
+                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
             elif self.mode==1:
                 self.prepareAcquisition()
             elif self.mode==2:
@@ -648,6 +648,24 @@ class imageLoader(QWidget):
         self.imgMinBox.setText(str(self.min))
         self.imgMaxBox.setText(str(self.max))
         self.imgSignal.emit(self)
+
+    # def update_img(self):
+    #     num = int(self.currentNumBox.text())
+    #     rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
+    #     buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+    #     outputBuffer = (ct.c_ushort * (self.width * self.height))()
+    #     outBuffer = (ct.c_ubyte*(self.width*self.height))()
+    #     max = ct.c_double()
+    #     min = ct.c_double()
+    #     ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
+    #     dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
+    #                          ct.byref(max), ct.byref(min))
+    #     self.min = min.value
+    #     self.max = max.value
+    #     self.img = np.array(outBuffer).reshape(self.height, self.width)
+    #     self.imgMinBox.setText(str(self.min))
+    #     self.imgMaxBox.setText(str(self.max))
+    #     self.imgSignal.emit(self)
 
 
 class processWidget(QGroupBox):
