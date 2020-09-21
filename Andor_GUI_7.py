@@ -586,8 +586,37 @@ class imageLoader(QWidget):
         self.dirname = None
         self.img = None
 
+    # def selectDirectory(self):
+    #     dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
+    #     dirname = QDir.toNativeSeparators(dirname)
+    #     self.dirBox.setText(dirname)
+    #     metafile = dirname + r'\metaSpool.txt'
+    #     if os.path.isfile(metafile):
+    #         self.dirname = dirname
+    #         f = open(metafile, mode='r')
+    #         metadata = f.readlines()
+    #         f.close()
+    #         self.datfiles = glob(dirname + r"\*.dat")
+    #         self.filenum = len(self.datfiles)
+    #         self.fileNumBox.setText(str(self.filenum))
+    #         self.anlzStartBox.setMaximum(self.filenum-1)
+    #         self.anlzEndBox.setMaximum(self.filenum-1)
+    #         self.anlzEndBox.setValue(self.filenum-1)
+    #         self.imgSize = int(metadata[0])
+    #         self.encoding = metadata[1]
+    #         self.stride = int(metadata[2])
+    #         self.height = int(metadata[3])
+    #         self.width = int(metadata[4])
+    #         self.currentNumBox.setMaximum(self.filenum - 1)
+    #         self.update_img()
+    #     else:
+    #         logging.error('No metadata was found.\n')
+
     def selectDirectory(self):
         dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
+        if not self.mm is None:
+            mm.close()
+            self.f.close()
         dirname = QDir.toNativeSeparators(dirname)
         self.dirBox.setText(dirname)
         metafile = dirname + r'\metaSpool.txt'
@@ -598,16 +627,19 @@ class imageLoader(QWidget):
             f.close()
             self.datfiles = glob(dirname + r"\*.dat")
             self.filenum = len(self.datfiles)
-            self.fileNumBox.setText(str(self.filenum))
-            self.anlzStartBox.setMaximum(self.filenum-1)
-            self.anlzEndBox.setMaximum(self.filenum-1)
-            self.anlzEndBox.setValue(self.filenum-1)
             self.imgSize = int(metadata[0])
             self.encoding = metadata[1]
             self.stride = int(metadata[2])
             self.height = int(metadata[3])
             self.width = int(metadata[4])
-            self.currentNumBox.setMaximum(self.filenum - 1)
+            self.frameNum = int(metadata[6])
+            self.fileNumBox.setText(str(self.frameNum))
+            self.anlzStartBox.setMaximum(self.frameNum-1)
+            self.anlzEndBox.setMaximum(self.frameNum-1)
+            self.anlzEndBox.setValue(self.frameNum-1)
+            self.currentNumBox.setMaximum(self.frameNum - 1)
+            self.f = open(dirname + "movie.dat", mode="r+b")
+            self.mm = mmap.mmap(self.f.fileno(), 0)
             self.update_img()
         else:
             logging.error('No metadata was found.\n')
@@ -633,8 +665,9 @@ class imageLoader(QWidget):
 
     def update_img(self):
         num = int(self.currentNumBox.text())
-        rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
-        buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+        mm.seek(self.imgSize*num)
+        rawdata = mm.read(int(self.imgSize))
+        buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
         outputBuffer = (ct.c_ushort * (self.width * self.height))()
         outBuffer = (ct.c_ubyte*(self.width*self.height))()
         max = ct.c_double()
