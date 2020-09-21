@@ -1,6 +1,7 @@
 import mmap
 
-dir = r"C:\Users\Ryoma\Documents\00_Simulation\program_test\23_41_58"
+# dir = r"C:\Users\Ryoma\Documents\00_Simulation\program_test\23_41_58"
+dir = "C:\Users\Shimura-lab\Documents\Fukuhara\Experiment\test\23_41_58"
 metafile = dir + "/metaSpool.txt"
 file = dir + "/movie.dat"
 with open(metafile, mode='r') as f:
@@ -11,5 +12,5 @@ size, code, stride, height, width, frate = metadata
 with open(file, mode='r+b') as f:
     mm = mmap.mmap(f.fileno(), 0)
     img = mm.read(int(size))
-    print(img)
+    print(type(img))
     mm.close()
