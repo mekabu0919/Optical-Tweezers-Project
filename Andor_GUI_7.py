@@ -9,6 +9,7 @@ import pandas as pd
 import cv2
 import logging
 import socket
+import mmap
 from glob import glob
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import QDir, Qt, QSettings, QTimer
@@ -616,13 +617,13 @@ class imageLoader(QWidget):
 
     def selectDirectory(self):
         dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
-        if not self.mm is None:
-            mm.close()
-            self.f.close()
         dirname = QDir.toNativeSeparators(dirname)
         self.dirBox.setText(dirname)
         metafile = dirname + r'\metaSpool.txt'
         if os.path.isfile(metafile):
+            if not self.mm is None:
+                self.mm.close()
+                self.f.close()
             self.dirname = dirname
             f = open(metafile, mode='r')
             metadata = f.readlines()
@@ -640,7 +641,7 @@ class imageLoader(QWidget):
             self.anlzEndBox.setMaximum(self.frameNum-1)
             self.anlzEndBox.setValue(self.frameNum-1)
             self.currentNumBox.setMaximum(self.frameNum - 1)
-            self.f = open(dirname + "movie.dat", mode="r+b")
+            self.f = open(dirname + "/spool.dat", mode="r+b")
             self.mm = mmap.mmap(self.f.fileno(), 0)
             self.update_img()
         else:
@@ -667,8 +668,8 @@ class imageLoader(QWidget):
 
     def update_img(self):
         num = int(self.currentNumBox.text())
-        mm.seek(self.imgSize*num)
-        rawdata = mm.read(int(self.imgSize))
+        self.mm.seek(self.imgSize*num)
+        rawdata = self.mm.read(int(self.imgSize))
         buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
         outputBuffer = (ct.c_ushort * (self.width * self.height))()
         outBuffer = (ct.c_ubyte*(self.width*self.height))()
