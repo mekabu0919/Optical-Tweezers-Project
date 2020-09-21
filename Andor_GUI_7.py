@@ -585,6 +585,8 @@ class imageLoader(QWidget):
     def initVal(self):
         self.dirname = None
         self.img = None
+        self.mm = None
+        self.f = None
 
     # def selectDirectory(self):
     #     dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
