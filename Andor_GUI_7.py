@@ -235,7 +235,7 @@ class ImageProcessor(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, datfiles, width, height, stride, prms, dir, pBar):
+    def setup(self, datfiles, width, height, stride, prms, dir, pBar, old, mm=None):
         self.datfiles = datfiles
         self.width = width
         self.height = height
@@ -243,6 +243,7 @@ class ImageProcessor(QtCore.QThread):
         self.prms = prms
         self.dir = dir
         self.pBar = pBar
+        self.old = old
         self.stopped = False
 
     def stop(self):
@@ -252,22 +253,42 @@ class ImageProcessor(QtCore.QThread):
     def run(self):
         if self.stopped:
             return
-        ImgArry = (ct.c_ushort * (self.width * self.height))()
-        point = (ct.c_float*2)()
-        pointlst = []
-        num = len(self.datfiles)
-        self.pBar.setMaximum(num-1)
-        for datfile, i in zip(self.datfiles, range(num)):
-            rawdata = np.fromfile(datfile, dtype=np.uint8)
-            buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-            ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
-            dll.processImage(point, self.height, self.width, ImgArry, self.prms)
-            pointlst.append([point[0], point[1]])
-            self.pBar.setValue(i)
-        DF = pd.DataFrame(np.array(pointlst))
-        DF.columns = ['x', 'y']
-        DF.to_csv(self.dir + r"\COG.csv")
-        logging.info("analysis finished")
+        if self.old:
+            ImgArry = (ct.c_ushort * (self.width * self.height))()
+            point = (ct.c_float*2)()
+            pointlst = []
+            num = len(self.datfiles)
+            self.pBar.setMaximum(num-1)
+            for datfile, i in zip(self.datfiles, range(num)):
+                rawdata = np.fromfile(datfile, dtype=np.uint8)
+                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
+                dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                pointlst.append([point[0], point[1]])
+                self.pBar.setValue(i)
+            DF = pd.DataFrame(np.array(pointlst))
+            DF.columns = ['x', 'y']
+            DF.to_csv(self.dir + r"\COG.csv")
+            logging.info("analysis finished")
+        else:
+            ImgArry = (ct.c_ushort * (self.width * self.height))()
+            point = (ct.c_float*2)()
+            pointlst = []
+            datfile, start, end = self.datfiles
+            num = end - start
+            self.pBar.setMaximum(num-1)
+            self.mm.seek(self.imgSize*start)
+            for i in range(num):
+                rawdata = self.mm.read(int(self.imgSize))
+                buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+                ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
+                dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                pointlst.append([point[0], point[1]])
+                self.pBar.setValue(i)
+            DF = pd.DataFrame(np.array(pointlst))
+            DF.columns = ['x', 'y']
+            DF.to_csv(self.dir + r"\COG.csv")
+            logging.info("analysis finished")
 
 
 # class definition for UI
@@ -588,32 +609,7 @@ class imageLoader(QWidget):
         self.img = None
         self.mm = None
         self.f = None
-
-    # def selectDirectory(self):
-    #     dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
-    #     dirname = QDir.toNativeSeparators(dirname)
-    #     self.dirBox.setText(dirname)
-    #     metafile = dirname + r'\metaSpool.txt'
-    #     if os.path.isfile(metafile):
-    #         self.dirname = dirname
-    #         f = open(metafile, mode='r')
-    #         metadata = f.readlines()
-    #         f.close()
-    #         self.datfiles = glob(dirname + r"\*.dat")
-    #         self.filenum = len(self.datfiles)
-    #         self.fileNumBox.setText(str(self.filenum))
-    #         self.anlzStartBox.setMaximum(self.filenum-1)
-    #         self.anlzEndBox.setMaximum(self.filenum-1)
-    #         self.anlzEndBox.setValue(self.filenum-1)
-    #         self.imgSize = int(metadata[0])
-    #         self.encoding = metadata[1]
-    #         self.stride = int(metadata[2])
-    #         self.height = int(metadata[3])
-    #         self.width = int(metadata[4])
-    #         self.currentNumBox.setMaximum(self.filenum - 1)
-    #         self.update_img()
-    #     else:
-    #         logging.error('No metadata was found.\n')
+        self.old = True
 
     def selectDirectory(self):
         dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -628,22 +624,39 @@ class imageLoader(QWidget):
             f = open(metafile, mode='r')
             metadata = f.readlines()
             f.close()
-            self.datfiles = glob(dirname + r"\*.dat")
-            self.filenum = len(self.datfiles)
-            self.imgSize = int(metadata[0])
-            self.encoding = metadata[1]
-            self.stride = int(metadata[2])
-            self.height = int(metadata[3])
-            self.width = int(metadata[4])
-            self.frameNum = int(metadata[6])
-            self.fileNumBox.setText(str(self.frameNum))
-            self.anlzStartBox.setMaximum(self.frameNum-1)
-            self.anlzEndBox.setMaximum(self.frameNum-1)
-            self.anlzEndBox.setValue(self.frameNum-1)
-            self.currentNumBox.setMaximum(self.frameNum - 1)
-            self.f = open(dirname + "/spool.dat", mode="r+b")
-            self.mm = mmap.mmap(self.f.fileno(), 0)
-            self.update_img()
+            if len(metadata) == 5:
+                self.old = True
+                self.datfiles = glob(dirname + r"\*.dat")
+                self.filenum = len(self.datfiles)
+                self.fileNumBox.setText(str(self.filenum))
+                self.anlzStartBox.setMaximum(self.filenum-1)
+                self.anlzEndBox.setMaximum(self.filenum-1)
+                self.anlzEndBox.setValue(self.filenum-1)
+                self.imgSize = int(metadata[0])
+                self.encoding = metadata[1]
+                self.stride = int(metadata[2])
+                self.height = int(metadata[3])
+                self.width = int(metadata[4])
+                self.currentNumBox.setMaximum(self.filenum - 1)
+                self.update_img()
+            else:
+                self.old = False
+                self.datfiles = glob(dirname + r"\*.dat")
+                self.filenum = len(self.datfiles)
+                self.imgSize = int(metadata[0])
+                self.encoding = metadata[1]
+                self.stride = int(metadata[2])
+                self.height = int(metadata[3])
+                self.width = int(metadata[4])
+                self.frameNum = int(metadata[6])
+                self.fileNumBox.setText(str(self.frameNum))
+                self.anlzStartBox.setMaximum(self.frameNum-1)
+                self.anlzEndBox.setMaximum(self.frameNum-1)
+                self.anlzEndBox.setValue(self.frameNum-1)
+                self.currentNumBox.setMaximum(self.frameNum - 1)
+                self.f = open(dirname + "/spool.dat", mode="r+b")
+                self.mm = mmap.mmap(self.f.fileno(), 0)
+                self.update_img()
         else:
             logging.error('No metadata was found.\n')
 
@@ -667,41 +680,41 @@ class imageLoader(QWidget):
 
 
     def update_img(self):
-        num = int(self.currentNumBox.text())
-        self.mm.seek(self.imgSize*num)
-        rawdata = self.mm.read(int(self.imgSize))
-        buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
-        outputBuffer = (ct.c_ushort * (self.width * self.height))()
-        outBuffer = (ct.c_ubyte*(self.width*self.height))()
-        max = ct.c_double()
-        min = ct.c_double()
-        ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
-        dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
+        if self.old:
+            num = int(self.currentNumBox.text())
+            rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
+            buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+            outputBuffer = (ct.c_ushort * (self.width * self.height))()
+            outBuffer = (ct.c_ubyte*(self.width*self.height))()
+            max = ct.c_double()
+            min = ct.c_double()
+            ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
+            dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
                              ct.byref(max), ct.byref(min))
-        self.min = min.value
-        self.max = max.value
-        self.img = np.array(outBuffer).reshape(self.height, self.width)
-        self.imgMinBox.setText(str(self.min))
-        self.imgMaxBox.setText(str(self.max))
-        self.imgSignal.emit(self)
-
-    # def update_img(self):
-    #     num = int(self.currentNumBox.text())
-    #     rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
-    #     buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-    #     outputBuffer = (ct.c_ushort * (self.width * self.height))()
-    #     outBuffer = (ct.c_ubyte*(self.width*self.height))()
-    #     max = ct.c_double()
-    #     min = ct.c_double()
-    #     ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
-    #     dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
-    #                          ct.byref(max), ct.byref(min))
-    #     self.min = min.value
-    #     self.max = max.value
-    #     self.img = np.array(outBuffer).reshape(self.height, self.width)
-    #     self.imgMinBox.setText(str(self.min))
-    #     self.imgMaxBox.setText(str(self.max))
-    #     self.imgSignal.emit(self)
+            self.min = min.value
+            self.max = max.value
+            self.img = np.array(outBuffer).reshape(self.height, self.width)
+            self.imgMinBox.setText(str(self.min))
+            self.imgMaxBox.setText(str(self.max))
+            self.imgSignal.emit(self)
+        else:
+            num = int(self.currentNumBox.text())
+            self.mm.seek(self.imgSize*num)
+            rawdata = self.mm.read(int(self.imgSize))
+            buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+            outputBuffer = (ct.c_ushort * (self.width * self.height))()
+            outBuffer = (ct.c_ubyte*(self.width*self.height))()
+            max = ct.c_double()
+            min = ct.c_double()
+            ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
+            dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
+                                 ct.byref(max), ct.byref(min))
+            self.min = min.value
+            self.max = max.value
+            self.img = np.array(outBuffer).reshape(self.height, self.width)
+            self.imgMinBox.setText(str(self.min))
+            self.imgMaxBox.setText(str(self.max))
+            self.imgSignal.emit(self)
 
 
 class processWidget(QGroupBox):
@@ -1577,14 +1590,23 @@ class centralWidget(QWidget):
         logging.info("applySettings")
         start = self.imageLoader.anlzStartBox.value()
         end = self.imageLoader.anlzEndBox.value()
-        processfiles = []
-        for i in range(start, end):
-            processfiles.append(self.imageLoader.datfiles[i])
-        logging.info("setup")
-        self.imageProcessor.setup(processfiles, self.imageLoader.width,
-                                  self.imageLoader.height, self.imageLoader.stride,
-                                  self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar)
-        self.imageProcessor.run()
+        if self.imageLoader.old:
+            processfiles = []
+            for i in range(start, end):
+                processfiles.append(self.imageLoader.datfiles[i])
+            logging.info("setup")
+            self.imageProcessor.setup(processfiles, self.imageLoader.width,
+                                      self.imageLoader.height, self.imageLoader.stride,
+                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.old)
+            self.imageProcessor.run()
+        else:
+            datFile = self.imageLoader.dirname +"/spool.dat"
+            processData = (datFile, start, end)
+            logging.info("setup")
+            self.imageProcessor.setup(processData, self.imageLoader.width,
+                                      self.imageLoader.height, self.imageLoader.stride,
+                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.old, self.mm)
+            self.imageProcessor.run()
 
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
