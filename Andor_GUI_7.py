@@ -103,6 +103,7 @@ class ImageAcquirer(QtCore.QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.stopped = False
+        self.stopDll = ct.c_bool(False)
         self.mutex = QtCore.QMutex()
 
     def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **prms):
@@ -111,15 +112,17 @@ class ImageAcquirer(QtCore.QThread):
         self.fixed = fixed
         self.mode = mode
         self.prms = prms
+        self.stop
         if center is None:
             self.center = (ct.c_float*2)(0.0, 0.0)
         else:
             self.center = (ct.c_float*2)(center[0], center[1])
-
+        self.stopDll.value = False
         self.stopped = False
 
     def stop(self):
         with QtCore.QMutexLocker(self.mutex):
+            self.stopDll.value = True
             self.stopped = True
 
     def run(self):
@@ -127,7 +130,7 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
+                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], ct.byref(self.stopDll))
             elif self.mode==1:
                 self.prepareAcquisition()
             elif self.mode==2:
@@ -1266,6 +1269,7 @@ class centralWidget(QWidget):
         self.ref = ct.c_int()
         self.CentralPos = None
         self.outDIO = [0, 0, 0, 0, 0, 0]
+        self.stopDll = ct.c_bool(False)
         self.fin = True
 
         self.openSettings()
@@ -1484,6 +1488,7 @@ class centralWidget(QWidget):
             #         self.acquisitionWidget.runButton.setChecked(False)
 
         else:
+            self.imageAcquirer.stopDll.value = True
             self.imageAcquirer.stopped = True
             self.imagePlayer.stopped = True
             self.acquisitionWidget.runButton.setText("RUN")
@@ -1620,19 +1625,32 @@ class centralWidget(QWidget):
         if dirToSave:
             start = self.imageLoader.anlzStartBox.value()
             end = self.imageLoader.anlzEndBox.value()
-            for i in range(start, end):
-                rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
-                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-                outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+            if self.imageLoader.old:
+                for i in range(start, end):
+                    rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
+                    buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                    outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+                    outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
+                    max = ct.c_double()
+                    min = ct.c_double()
+                    ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                    dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
+                                         ct.byref(max), ct.byref(min))
+                    img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                    cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
+            else:
+                ImgArry = (ct.c_ushort * (self.width * self.height))()
                 outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
-                max = ct.c_double()
-                min = ct.c_double()
-                ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
-                dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
-                                     ct.byref(max), ct.byref(min))
-                img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
-                cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
-
+                num = end - start
+                self.imageLoader.mm.seek(self.imgSize*start)
+                for i in range(num):
+                    rawdata = self.imageLoader.mm.read(int(self.imageLoader.imgSize))
+                    buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+                    ret = dll.convertBuffer(buffer, ImgArry, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                    dll.processImageShow(self.imageLoader.height, self.imageLoader.width, ImgArry, self.imageLoader.prms, outBuffer,
+                                         ct.byref(max), ct.byref(min))
+                    img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                    cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
 
     def openSettings(self):
         self.settings = QSettings('setting.ini', 'Andor_GUI')
