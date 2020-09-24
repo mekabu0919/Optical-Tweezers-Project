@@ -1610,7 +1610,7 @@ class centralWidget(QWidget):
             logging.info("setup")
             self.imageProcessor.setup(processData, self.imageLoader.width,
                                       self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.old, self.mm)
+                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
             self.imageProcessor.run()
 
     def exportBMP(self):
