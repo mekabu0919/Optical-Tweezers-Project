@@ -247,6 +247,7 @@ class ImageProcessor(QtCore.QThread):
         self.dir = dir
         self.pBar = pBar
         self.old = old
+        self.mm = mm
         self.stopped = False
 
     def stop(self):
@@ -277,12 +278,12 @@ class ImageProcessor(QtCore.QThread):
             ImgArry = (ct.c_ushort * (self.width * self.height))()
             point = (ct.c_float*2)()
             pointlst = []
-            datfile, start, end = self.datfiles
+            datfile, start, end, imgSize = self.datfiles
             num = end - start
             self.pBar.setMaximum(num-1)
-            self.mm.seek(self.imgSize*start)
+            self.mm.seek(imgSize*start)
             for i in range(num):
-                rawdata = self.mm.read(int(self.imgSize))
+                rawdata = self.mm.read(imgSize)
                 buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
                 ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
                 dll.processImage(point, self.height, self.width, ImgArry, self.prms)
@@ -703,7 +704,7 @@ class imageLoader(QWidget):
         else:
             num = int(self.currentNumBox.text())
             self.mm.seek(self.imgSize*num)
-            rawdata = self.mm.read(int(self.imgSize))
+            rawdata = self.mm.read(self.imgSize)
             buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
             outputBuffer = (ct.c_ushort * (self.width * self.height))()
             outBuffer = (ct.c_ubyte*(self.width*self.height))()
@@ -1606,7 +1607,7 @@ class centralWidget(QWidget):
             self.imageProcessor.run()
         else:
             datFile = self.imageLoader.dirname +"/spool.dat"
-            processData = (datFile, start, end)
+            processData = (datFile, start, end, self.imageLoader.imgSize)
             logging.info("setup")
             self.imageProcessor.setup(processData, self.imageLoader.width,
                                       self.imageLoader.height, self.imageLoader.stride,
@@ -1639,13 +1640,15 @@ class centralWidget(QWidget):
                     img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
                     cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
             else:
-                ImgArry = (ct.c_ushort * (self.width * self.height))()
+                ImgArry = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
                 outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
                 num = end - start
-                self.imageLoader.mm.seek(self.imgSize*start)
+                self.imageLoader.mm.seek(self.imageLoader.imgSize*start)
                 for i in range(num):
                     rawdata = self.imageLoader.mm.read(int(self.imageLoader.imgSize))
                     buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+                    max = ct.c_double()
+                    min = ct.c_double()
                     ret = dll.convertBuffer(buffer, ImgArry, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
                     dll.processImageShow(self.imageLoader.height, self.imageLoader.width, ImgArry, self.imageLoader.prms, outBuffer,
                                          ct.byref(max), ct.byref(min))
