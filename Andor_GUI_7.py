@@ -628,7 +628,7 @@ class imageLoader(QWidget):
             f = open(metafile, mode='r')
             metadata = f.readlines()
             f.close()
-            if len(metadata) == 5:
+            if len(metadata) != 7:
                 self.old = True
                 self.datfiles = glob(dirname + r"\*.dat")
                 self.filenum = len(self.datfiles)
