@@ -1010,6 +1010,14 @@ class shutterWidget(QGroupBox):
         self.closeButton.setChecked(True)
         self.setTitle("Shutter Controller")
 
+    def change(self):
+        if self.openButton.isChecked():
+            self.closeButton.click()
+        else:
+            self.openButton.click()
+        QApplication.processEvents()
+
+
 class Logger(logging.Handler):
     def __init__(self, parent):
      super().__init__()
@@ -1428,10 +1436,11 @@ class centralWidget(QWidget):
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
                         repeat = self.specialPrms["repeat"]
-                        self.writeDIO(2)
+                        self.shutterWidget.closeButton.click()
+                        QApplication.processEvents()
                         logging.info('Acquisition start')
                         for i in range(repeat*2):
-                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2+1)+" of "+str(i//2+1))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
                                                      num=ct.c_int(num), count_p=count_p)
                             self.imageAcquirer.start()
@@ -1443,7 +1452,7 @@ class centralWidget(QWidget):
                                     ref = count.value
                             count = ct.c_int(0)
                             count_p = ct.pointer(count)
-                            self.writeDIO(3-i%2)
+                            self.shutterWidget.change()
                             waitTime = time.time()
                             while True:
                                 now = time.time()
