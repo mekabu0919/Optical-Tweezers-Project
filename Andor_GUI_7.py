@@ -465,6 +465,49 @@ class fixedWidget(QWidget):
         self.dirBox.setText(self.dirname)
 
 
+class AOISettingBox(QGroupBox):
+
+    def __init__(self, parent=None):
+        super().__init__("AOI Settings", parent)
+
+        self.defaultCheck = QRadioButton("Default")
+
+        self.AOISizeBox = QComboBox(self)
+        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128','Custom']
+        self.AOISizeBox.addItems(AOISizeList)
+        self.CenterXBox = QSpinBox(self)
+        self.CenterYBox = QSpinBox(self)
+        self.CenterXBox.setMinimum(-1024)
+        self.CenterYBox.setMinimum(-1024)
+        self.CenterXBox.setMaximum(1024)
+        self.CenterYBox.setMaximum(1024)
+
+
+        self.customCheck = QRadioButton("Customized")
+
+
+        self.AOILeftBox = QSpinBox(self)
+        self.AOITopBox = QSpinBox(self)
+        self.AOIWidthBox = QSpinBox(self)
+        self.AOIHeightBox = QSpinBox(self)
+        AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
+        for obj in AOIBoxList:
+            obj.setMaximum(2048)
+
+        defaultLayout = QVBoxLayout()
+        defaultLayout.addWidget(self.defaultCheck)
+        dHLayout = QHBoxLayout()
+        setListToLayout(dHLayout, [LHLayout("Size:", self.AOISizeBox), LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
+        defaultLayout.addLayout(dHLayout)
+        customLayout = QVBoxLayout()
+        customLayout.addWidget(self.customCheck)
+        cHLayout = QHBoxLayout()
+        setListToLayout(cHLayout, [LHLayout("Top: ", self.AOITopBox), LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox), LHLayout("Height: ", self.AOIHeightBox)])
+        customLayout.addLayout(cHLayout)
+        layout = QHBoxLayout(self)
+        layout.addLayout(defaultLayout)
+        layout.addLayout(customLayout)
+
 class AcquisitionWidget(QWidget):
 
     def __init__(self, parent=None):
@@ -473,16 +516,17 @@ class AcquisitionWidget(QWidget):
         self.contWidget = contWidget(self)
         self.fixedWidget = fixedWidget(self)
 
+        self.AOI = AOISettingBox(self)
         self.AOIWidth = self.AOIHeight = 2048
 
         self.Tab = QTabWidget()
-        self.Tab.addTab(self.contWidget, 'Continuous')
-        self.Tab.addTab(self.fixedWidget, 'Fixed')
+        self.Tab.addTab(self.contWidget, 'Live Image')
+        self.Tab.addTab(self.fixedWidget, 'Recording')
 
         self.initUI()
-        self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
-        self.AOIWidthBox.valueChanged.connect(self.setAOISize)
-        self.AOIHeightBox.valueChanged.connect(self.setAOISize)
+        # self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
+        # self.AOIWidthBox.valueChanged.connect(self.setAOISize)
+        # self.AOIHeightBox.valueChanged.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -490,22 +534,8 @@ class AcquisitionWidget(QWidget):
         self.handleBox.setSizePolicy(QSizePolicy(5, 0))
         self.exposeTBox = QDoubleSpinBox(self)
         self.exposeTBox.setDecimals(5)
-        self.AOISizeBox = QComboBox(self)
-        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128','free']
-        self.AOISizeBox.addItems(AOISizeList)
-        self.AOILeftBox = QSpinBox(self)
-        self.AOITopBox = QSpinBox(self)
-        self.AOIWidthBox = QSpinBox(self)
-        self.AOIHeightBox = QSpinBox(self)
-        AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
-        for obj in AOIBoxList:
-            obj.setMaximum(2048)
-        self.CenterXBox = QSpinBox(self)
-        self.CenterYBox = QSpinBox(self)
-        self.CenterXBox.setMinimum(-1024)
-        self.CenterYBox.setMinimum(-1024)
-        self.CenterXBox.setMaximum(1024)
-        self.CenterYBox.setMaximum(1024)
+
+
         self.AOIBinBox = QComboBox(self)
         AOIBinList = ["1x1", "2x2", "3x3", "4x4", "8x8"]
         self.AOIBinBox.addItems(AOIBinList)
@@ -528,17 +558,18 @@ class AcquisitionWidget(QWidget):
         setListToLayout(hbox00, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
                                  LHLayout("Binnng: ", self.AOIBinBox), self.globalClearButton])
 
-        hbox01 = QHBoxLayout()
-        setListToLayout(hbox01, [LHLayout("AOI Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
-                                 LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
-                                 LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
-                                 LHLayout("Y: ", self.CenterYBox)])
+        # AOILayout = QHBoxLayout()
+        # self.AOIGroupBox.setLayout(AOILayout)
+        # setListToLayout(AOILayout, [LHLayout("Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
+        #                          LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
+        #                          LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
+        #                          LHLayout("Y: ", self.CenterYBox)])
 
         hbox03 = QHBoxLayout()
         setListToLayout(hbox03, [self.initButton, self.applyButton, self.runButton, self.finButton])
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [hbox00, hbox01, self.Tab, hbox03])
+        setListToLayout(vbox0, [hbox00, self.AOI, self.Tab, hbox03])
 
     def setAOISize(self):
         index = self.AOISizeBox.currentIndex()
@@ -1512,8 +1543,8 @@ class centralWidget(QWidget):
         self.acquisitionWidget.fixedWidget.cntrPosLabel.setText("Center of position: ({:.2f}, {:.2f})".format(self.CentralPos[0], self.CentralPos[1]))
 
     def setAOICenter(self):
-        centerX = self.acquisitionWidget.CenterXBox.value()
-        centerY = self.acquisitionWidget.CenterYBox.value()
+        centerX = self.acquisitionWidget.AOI.CenterXBox.value()
+        centerY = self.acquisitionWidget.AOI.CenterYBox.value()
         AOISizeIndex = self.acquisitionWidget.AOISizeBox.currentIndex()
         AOISize = 2048/2**AOISizeIndex
         if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
@@ -1530,13 +1561,13 @@ class centralWidget(QWidget):
         dll.SetEnumString(self.Handle, "AOIBinning", self.acquisitionWidget.AOIBinBox.currentText())
         index = self.acquisitionWidget.AOISizeBox.currentIndex()
         if index == 5:
-            if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOIWidthBox.value()):
+            if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOI.AOIWidthBox.value()):
                 logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOILeftBox.value()):
+            if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOI.AOILeftBox.value()):
                 logging.error("AOILeft")
-            if dll.SetInt(self.Handle, "AOIHeight", self.acquisitionWidget.AOIHeightBox.value()):
+            if dll.SetInt(self.Handle, "AOIHeight", self.acquisitionWidget.AOI.AOIHeightBox.value()):
                 logging.error("AOIHeight")
-            if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOITopBox.value()):
+            if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOI.AOITopBox.value()):
                 logging.error("AOITop")
         elif index == 0:
             if dll.SetInt(self.Handle, "AOIWidth", 2048):
@@ -1680,12 +1711,12 @@ class centralWidget(QWidget):
         self.processWidget.contButton.setChecked(settings.value('cont', type=bool))
         self.processWidget.contNum.setValue(settings.value('cont num', type=int))
         self.acquisitionWidget.exposeTBox.setValue(settings.value('exposure time', 0.01, type=float))
-        self.acquisitionWidget.AOILeftBox.setValue(settings.value('AOI left', type=int))
-        self.acquisitionWidget.AOITopBox.setValue(settings.value('AOI top', type=int))
-        self.acquisitionWidget.AOIWidthBox.setValue(settings.value('AOI width', type=int))
-        self.acquisitionWidget.AOIHeightBox.setValue(settings.value('AOI height', type=int))
-        self.acquisitionWidget.CenterXBox.setValue(settings.value('Center X', type=int))
-        self.acquisitionWidget.CenterYBox.setValue(settings.value('Center Y', type=int))
+        self.acquisitionWidget.AOI.AOILeftBox.setValue(settings.value('AOI left', type=int))
+        self.acquisitionWidget.AOI.AOITopBox.setValue(settings.value('AOI top', type=int))
+        self.acquisitionWidget.AOI.AOIWidthBox.setValue(settings.value('AOI width', type=int))
+        self.acquisitionWidget.AOI.AOIHeightBox.setValue(settings.value('AOI height', type=int))
+        self.acquisitionWidget.AOI.CenterXBox.setValue(settings.value('Center X', type=int))
+        self.acquisitionWidget.AOI.CenterYBox.setValue(settings.value('Center Y', type=int))
         self.acquisitionWidget.fixedWidget.thresBox.setValue(settings.value('DIO threshold', type=float))
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
@@ -1709,12 +1740,12 @@ class centralWidget(QWidget):
         self.settings.setValue('cont', self.processWidget.contButton.isChecked())
         self.settings.setValue('cont num', self.processWidget.contNum.value())
         self.settings.setValue('exposure time', self.acquisitionWidget.exposeTBox.value())
-        self.settings.setValue('AOI left', self.acquisitionWidget.AOILeftBox.value())
-        self.settings.setValue('AOI top', self.acquisitionWidget.AOITopBox.value())
-        self.settings.setValue('AOI width', self.acquisitionWidget.AOIWidthBox.value())
-        self.settings.setValue('AOI height', self.acquisitionWidget.AOIHeightBox.value())
-        self.settings.setValue('Center X', self.acquisitionWidget.CenterXBox.value())
-        self.settings.setValue('Center Y', self.acquisitionWidget.CenterYBox.value())
+        self.settings.setValue('AOI left', self.acquisitionWidget.AOI.AOILeftBox.value())
+        self.settings.setValue('AOI top', self.acquisitionWidget.AOI.AOITopBox.value())
+        self.settings.setValue('AOI width', self.acquisitionWidget.AOI.AOIWidthBox.value())
+        self.settings.setValue('AOI height', self.acquisitionWidget.AOI.AOIHeightBox.value())
+        self.settings.setValue('Center X', self.acquisitionWidget.AOI.CenterXBox.value())
+        self.settings.setValue('Center Y', self.acquisitionWidget.AOI.CenterYBox.value())
         self.settings.setValue('DIO threshold', self.acquisitionWidget.fixedWidget.thresBox.value())
         self.settings.setValue('marker factor', self.acquisitionWidget.contWidget.markerFactorBox.value())
         self.settings.setValue('dir image', self.imageLoader.dirname)
