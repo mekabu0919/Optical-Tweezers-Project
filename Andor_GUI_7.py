@@ -471,9 +471,10 @@ class AOISettingBox(QGroupBox):
         super().__init__("AOI Settings", parent)
 
         self.defaultCheck = QRadioButton("Default")
+        self.defaultCheck.setChecked(True)
 
         self.AOISizeBox = QComboBox(self)
-        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128','Custom']
+        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128']
         self.AOISizeBox.addItems(AOISizeList)
         self.CenterXBox = QSpinBox(self)
         self.CenterYBox = QSpinBox(self)
@@ -485,7 +486,6 @@ class AOISettingBox(QGroupBox):
 
         self.customCheck = QRadioButton("Customized")
 
-
         self.AOILeftBox = QSpinBox(self)
         self.AOITopBox = QSpinBox(self)
         self.AOIWidthBox = QSpinBox(self)
@@ -494,18 +494,30 @@ class AOISettingBox(QGroupBox):
         for obj in AOIBoxList:
             obj.setMaximum(2048)
 
+        self.AOIButtons = QButtonGroup(self)
+        self.AOIButtons.addButton(self.defaultCheck)
+        self.AOIButtons.addButton(self.customCheck)
+        self.AOIButtons.setExclusive(True)
+        self.AOIButtons.setId(self.defaultCheck, 0)
+        self.AOIButtons.setId(self.customCheck, 1)
+
         defaultLayout = QVBoxLayout()
         defaultLayout.addWidget(self.defaultCheck)
+        defaultLayout.addLayout(LHLayout("Size:", self.AOISizeBox))
         dHLayout = QHBoxLayout()
-        setListToLayout(dHLayout, [LHLayout("Size:", self.AOISizeBox), LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
+        setListToLayout(dHLayout, [LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
         defaultLayout.addLayout(dHLayout)
         customLayout = QVBoxLayout()
         customLayout.addWidget(self.customCheck)
-        cHLayout = QHBoxLayout()
-        setListToLayout(cHLayout, [LHLayout("Top: ", self.AOITopBox), LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox), LHLayout("Height: ", self.AOIHeightBox)])
-        customLayout.addLayout(cHLayout)
+        cLayout = QGridLayout()
+        cLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
+        cLayout.addLayout(LHLayout("Left: ", self.AOILeftBox), 0, 1)
+        cLayout.addLayout(LHLayout("Width: ", self.AOIWidthBox), 1, 0)
+        cLayout.addLayout(LHLayout("Height: ", self.AOIHeightBox), 1, 1)
+        customLayout.addLayout(cLayout)
         layout = QHBoxLayout(self)
         layout.addLayout(defaultLayout)
+        layout.addSpacing(20)
         layout.addLayout(customLayout)
 
 class AcquisitionWidget(QWidget):
@@ -524,9 +536,7 @@ class AcquisitionWidget(QWidget):
         self.Tab.addTab(self.fixedWidget, 'Recording')
 
         self.initUI()
-        # self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
-        # self.AOIWidthBox.valueChanged.connect(self.setAOISize)
-        # self.AOIHeightBox.valueChanged.connect(self.setAOISize)
+        self.AOI.AOIButtons.buttonClicked.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -571,12 +581,12 @@ class AcquisitionWidget(QWidget):
         vbox0 = QVBoxLayout(self)
         setListToLayout(vbox0, [hbox00, self.AOI, self.Tab, hbox03])
 
-    def setAOISize(self):
-        index = self.AOISizeBox.currentIndex()
-        if  index == 5:
-            self.AOIWidth = self.AOIWidthBox.value()
-            self.AOIHeight = self.AOIHeightBox.value()
+    def setAOISize(self, id):
+        if  id == 1:
+            self.AOIWidth = self.AOI.AOIWidthBox.value()
+            self.AOIHeight = self.AOI.AOIHeightBox.value()
         else:
+            index = self.AOI.AOISizeBox.currentIndex()
             val = 2048/(2**index)
             self.AOIWidth = val
             self.AOIHeight = val
@@ -1545,7 +1555,7 @@ class centralWidget(QWidget):
     def setAOICenter(self):
         centerX = self.acquisitionWidget.AOI.CenterXBox.value()
         centerY = self.acquisitionWidget.AOI.CenterYBox.value()
-        AOISizeIndex = self.acquisitionWidget.AOISizeBox.currentIndex()
+        AOISizeIndex = self.acquisitionWidget.AOI.AOISizeBox.currentIndex()
         AOISize = 2048/2**AOISizeIndex
         if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
             logging.error("AOIWidth")
@@ -1559,8 +1569,17 @@ class centralWidget(QWidget):
     def applySettings(self):
         dll.SetFloat(self.Handle, "Exposure Time", self.acquisitionWidget.exposeTBox.value())
         dll.SetEnumString(self.Handle, "AOIBinning", self.acquisitionWidget.AOIBinBox.currentText())
-        index = self.acquisitionWidget.AOISizeBox.currentIndex()
-        if index == 5:
+        isDefault = self.acquisitionWidget.AOI.defaultCheck.isChecked()
+        if isDefault:
+            index = self.acquisitionWidget.AOI.AOISizeBox.currentIndex()
+            if index == 0:
+                if dll.SetInt(self.Handle, "AOIWidth", 2048):
+                    logging.error("AOIWidth")
+                if dll.SetInt(self.Handle, "AOIHeight", 2048):
+                    logging.error("AOIHeight")
+            else:
+                self.setAOICenter()
+        else:
             if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOI.AOIWidthBox.value()):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOI.AOILeftBox.value()):
@@ -1569,19 +1588,7 @@ class centralWidget(QWidget):
                 logging.error("AOIHeight")
             if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOI.AOITopBox.value()):
                 logging.error("AOITop")
-        elif index == 0:
-            if dll.SetInt(self.Handle, "AOIWidth", 2048):
-                logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOIHeight", 2048):
-                logging.error("AOIHeight")
-        else:
-            self.setAOICenter()
-        # else:
-        #     if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
-        #         logging.error("AOIWidth")
-        #     if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
-        #         logging.error("AOIHeight")
-        #     dll.centreAOI(self.Handle)
+
         dll.SetBool(self.Handle, "RollingShutterGlobalClear", self.acquisitionWidget.globalClearButton.isChecked())
 
         frameRate = ct.c_double(float(self.acquisitionWidget.fixedWidget.frameRateBox.text()))
