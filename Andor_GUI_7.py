@@ -395,22 +395,31 @@ class contWidget(QWidget):
         self.markerPositionBoxY.setMinimum(-400)
         self.markerFactorBox = QSpinBox(self)
         self.markerFactorBox.setRange(0, 9999)
-        self.splitButton = QPushButton("Split", self)
-        self.splitButton.setCheckable(True)
+        self.splitButton = QCheckBox("Split", self)
 
         self.initLayout()
 
     def initLayout(self):
 
         hbox00 = QVBoxLayout()
-        setListToLayout(hbox00, [QLabel("Raw Image"), LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
+        ImageBox = QGroupBox("Raw Image", self)
+        ImageBox.setLayout(hbox00)
+        setListToLayout(hbox00, [LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
         hbox01 = QVBoxLayout()
-        setListToLayout(hbox01, [QLabel("Marker Position"), LHLayout('x: ', self.markerPositionBoxX), \
-                                 LHLayout('y: ', self.markerPositionBoxY), LHLayout('factor: ', [self.markerFactorBox, self.splitButton])])
+        posLayout = QGridLayout()
+        posLayout.addWidget(QLabel("Position"), 0, 0)
+        posLayout.addLayout(LHLayout('x: ', self.markerPositionBoxX), 0, 1)
+        posLayout.addLayout(LHLayout('y: ', self.markerPositionBoxY), 1, 1)
+        splitLayout = QHBoxLayout()
+        splitLayout.addWidget(self.splitButton)
+        splitLayout.addLayout(LHLayout('factor: ', self.markerFactorBox))
+        MarkerBox = QGroupBox("Marker", self)
+        MarkerBox.setLayout(hbox01)
+        setListToLayout(hbox01, [posLayout, splitLayout])
 
         hbox0 = QHBoxLayout(self)
-        setListToLayout(hbox0, [hbox00, hbox01])
+        setListToLayout(hbox0, [ImageBox, MarkerBox])
         hbox0.setStretch(0, 1)
         hbox0.setStretch(1, 1)
 
@@ -430,11 +439,12 @@ class fixedWidget(QWidget):
         self.dirBox = QLineEdit(self)
         self.dirBox.setReadOnly(True)
         self.dirButton = QPushButton('...', self)
+        self.dirButton.setMaximumWidth(20)
         self.dirButton.clicked.connect(self.selectDirectory)
         self.aqTypeBox = QComboBox(self)
         aqTypeList = ['No feed-back', 'Preparation', 'Do feed-back']
         self.aqTypeBox.addItems(aqTypeList)
-        self.cntrPosLabel = QLabel("Centre of position:", self)
+        self.cntrPosBox = QLineEdit(self)
         self.thresBox = QDoubleSpinBox(self)
         self.specialButton = QPushButton('Special Measurement', self)
         self.specialButton.setCheckable(True)
@@ -445,19 +455,36 @@ class fixedWidget(QWidget):
         self.initLayout()
 
     def initLayout(self):
-        hbox00 = QHBoxLayout()
-        setListToLayout(hbox00, [LHLayout("Frames", self.numImgBox), LHLayout("Frame Rate", self.frameRateBox), \
-                                 LHLayout("Directory: ", [self.dirBox, self.dirButton]), LHLayout("Current Frame", self.countBox)])
+        hbox00 = QGridLayout()
+        hbox00.addWidget(QLabel("Frames:"), 0, 0)
+        hbox00.addWidget(self.numImgBox, 0, 1)
+        hbox00.addWidget(QLabel("Frame Rate:"), 1, 0)
+        hbox00.addWidget(self.frameRateBox, 1, 1)
+        dirLayout = QHBoxLayout()
+        dirLayout.addWidget(self.dirBox)
+        dirLayout.addWidget(self.dirButton)
+        hbox00.addWidget(QLabel("Directory:"), 2, 0)
+        hbox00.addLayout(dirLayout, 2, 1)
+        hbox00.addWidget(QLabel("Current Frame:"), 3, 0)
+        hbox00.addWidget(self.countBox, 3, 1)
+        hbox00.setColumnStretch(0, 1)
+        hbox00.setColumnStretch(1, 1)
 
-        hbox01 = QHBoxLayout()
-        setListToLayout(hbox01, [self.aqTypeBox, self.cntrPosLabel, LHLayout("Threshold: ", self.thresBox)])
+        hbox01 = QGridLayout()
+        i = 0
+        for label, widget in [("Feedback:", self.aqTypeBox), ("Potential Center:", self.cntrPosBox), ("Threshold: ", self.thresBox)]:
+            hbox01.addWidget(QLabel(label), i, 0)
+            hbox01.addWidget(widget, i, 1)
+            i += 1
+        hbox01.addWidget(self.specialButton, 3, 0)
+        hbox01.addWidget(self.currentRepeatBox, 3, 1)
+        hbox01.setColumnStretch(0, 1)
+        hbox01.setColumnStretch(1, 1)
 
-        hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.specialButton)
-        hbox02.addWidget(self.currentRepeatBox)
-
-        vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [hbox00, hbox01, hbox02])
+        vbox0 = QHBoxLayout(self)
+        vbox0.addLayout(hbox00)
+        vbox0.addSpacing(20)
+        vbox0.addLayout(hbox01)
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -510,8 +537,8 @@ class AOISettingBox(QGroupBox):
         customLayout = QVBoxLayout()
         customLayout.addWidget(self.customCheck)
         cLayout = QGridLayout()
-        cLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
         cLayout.addLayout(LHLayout("Left: ", self.AOILeftBox), 0, 1)
+        cLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
         cLayout.addLayout(LHLayout("Width: ", self.AOIWidthBox), 1, 0)
         cLayout.addLayout(LHLayout("Height: ", self.AOIHeightBox), 1, 1)
         customLayout.addLayout(cLayout)
@@ -552,10 +579,10 @@ class AcquisitionWidget(QWidget):
         self.globalClearButton = QPushButton('Global clear', self)
         self.globalClearButton.setCheckable(True)
 
-        self.initButton = QPushButton("Initialize", self)
+        self.initButton = QPushButton("CONNECT", self)
         self.applyButton = QPushButton('APPLY', self)
         self.runButton = QPushButton('RUN', self)
-        self.finButton = QPushButton("Finalize", self)
+        self.finButton = QPushButton("DISCONNECT", self)
         self.applyButton.setEnabled(False)
         self.runButton.setCheckable(True)
         self.runButton.setEnabled(False)
@@ -623,7 +650,7 @@ class imageLoader(QWidget):
         self.imgMinBox.setReadOnly(True)
         self.imgMinBox.setSizePolicy(QSizePolicy(5, 0))
 
-        self.anlzButton = QPushButton('Analysis', self)
+        self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
 
@@ -1171,7 +1198,7 @@ class SpecialMeasurementDialog(QDialog):
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
 
-        self.repeatCheckBox = QRadioButton("Repeated Measurement", self)
+        self.repeatCheckBox = QRadioButton("Cycle Measurement", self)
         self.repeatBox = QSpinBox(self)
         self.repeatBox.setMinimum(1)
 
@@ -1186,13 +1213,13 @@ class SpecialMeasurementDialog(QDialog):
         hbox.addWidget(self.rejectButton)
 
         hbox2 = QHBoxLayout()
-        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um)", self.startBox),\
-                                LHLayout("End (um)", self.endBox), LHLayout("Step (um)", self.stepBox),\
-                                LHLayout("Number of each condition", self.numBox)])
+        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um):", self.startBox),\
+                                LHLayout("End (um):", self.endBox), LHLayout("Step (um):", self.stepBox),\
+                                LHLayout("Number of each condition:", self.numBox)])
 
         hbox3 = QHBoxLayout()
         hbox3.addWidget(self.repeatCheckBox)
-        hbox3.addLayout(LHLayout("Repetition", self.repeatBox))
+        hbox3.addLayout(LHLayout("Cycle:", self.repeatBox))
 
         vbox = QVBoxLayout(self)
         setListToLayout(vbox, [hbox2, hbox3, hbox])
@@ -1338,7 +1365,7 @@ class centralWidget(QWidget):
         dll.GetFloatMin(self.Handle, "Exposure Time", ct.byref(minExposeTime))
         self.acquisitionWidget.exposeTBox.setRange(minExposeTime.value, maxExposeTime.value)
         logging.info('Minimum exp. time: {}'.format(minExposeTime.value))
-        logging.info('Successfully initializied')
+        logging.info('Successfully connected')
         self.acquisitionWidget.initButton.setEnabled(False)
         self.acquisitionWidget.applyButton.setEnabled(True)
         self.acquisitionWidget.finButton.setEnabled(True)
@@ -1349,7 +1376,7 @@ class centralWidget(QWidget):
 
     def finalizeCamera(self):
         dll.fin(self.Handle)
-        logging.info('Successfully finalized\n')
+        logging.info('Successfully Disconnected')
         self.acquisitionWidget.finButton.setEnabled(False)
         self.acquisitionWidget.runButton.setEnabled(False)
         self.acquisitionWidget.applyButton.setEnabled(False)
@@ -1481,7 +1508,7 @@ class centralWidget(QWidget):
                         QApplication.processEvents()
                         logging.info('Acquisition start')
                         for i in range(repeat*2):
-                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2+1)+" of "+str(i//2+1))
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText("Measurement "+str(i%2+1)+" / Cycle "+str(i//2+1))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
                                                      num=ct.c_int(num), count_p=count_p)
                             self.imageAcquirer.start()
@@ -1550,7 +1577,7 @@ class centralWidget(QWidget):
     def applyCenter(self, posX, posY):
         self.CentralPos = (posX, posY)
         self.acquisitionWidget.runButton.setChecked(False)
-        self.acquisitionWidget.fixedWidget.cntrPosLabel.setText("Center of position: ({:.2f}, {:.2f})".format(self.CentralPos[0], self.CentralPos[1]))
+        self.acquisitionWidget.fixedWidget.cntrPosBox.setText("{:.2f}, {:.2f}".format(self.CentralPos[0], self.CentralPos[1]))
 
     def setAOICenter(self):
         centerX = self.acquisitionWidget.AOI.CenterXBox.value()
