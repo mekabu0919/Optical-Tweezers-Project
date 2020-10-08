@@ -834,6 +834,27 @@ class processWidget(QGroupBox):
         self.initLayout()
 
     def initLayout(self):
+        # gbox = QGridLayout()
+        # gbox.addWidget(self.normButton, 0, 0)
+        # gbox.addLayout(LHLayout("Min: ", self.normMin), 0, 1)
+        # gbox.addLayout(LHLayout("Max: ", self.normMax), 0, 2)
+        #
+        # gbox.addWidget(self.standButton, 0, 3)
+        # gbox.addLayout(LHLayout("Sigma: ", self.sigma), 0, 5)
+        #
+        # gbox.addWidget(self.blurButton, 1, 0)
+        # gbox.addLayout(LHLayout("Kernel size: ", self.blurSize), 1, 3)
+        # gbox.addLayout(LHLayout("Sigma: ", self.blurSigma), 1, 5)
+        #
+        # gbox.addWidget(self.thresButton, 2, 0)
+        # gbox.addLayout(LHLayout("Threshold: ", self.thresVal), 2, 2)
+        # gbox.addLayout(LHLayout("Type: ", self.thresType), 2, 4)
+        # gbox.addWidget(self.OtsuButton, 2, 5)
+        #
+        # gbox.addWidget(self.contButton, 3, 0)
+        # gbox.addLayout(LHLayout("Number to Find: ", self.contNum), 3, 3)
+
+
         hbox000 = QHBoxLayout()
         setListToLayout(hbox000, [self.normButton, LHLayout("Min: ", self.normMin),\
                                   LHLayout("Max: ", self.normMax)])
@@ -859,6 +880,8 @@ class processWidget(QGroupBox):
         hbox03.addLayout(LHLayout("Number to Find: ", self.contNum))
 
         vbox0 = QVBoxLayout(self)
+        # vbox0.addLayout(gbox)
+        # vbox0.addWidget(self.applyButton)
         setListToLayout(vbox0, [hbox00, hbox01, hbox02, hbox03, self.applyButton])
 
         # self.setStyleSheet("background-color:white;")
