@@ -930,9 +930,20 @@ class SLM_Controller(QGroupBox):
         self.SLMDial.setWrapping(True)
         self.SLMDial.setMaximum(360)
         self.SLMDial.setMinimum(0)
+        self.SLMDial.setMinimumSize(150, 150)
 
         self.rotationBox.valueChanged[int].connect(self.SLMDial.setValue)
         self.SLMDial.valueChanged[int].connect(self.rotationBox.setValue)
+
+        self.tiltXBox = QDoubleSpinBox(self)
+        self.tiltYBox = QDoubleSpinBox(self)
+
+        self.tiltXBox.valueChanged.connect(self.tiltXChanged)
+        self.tiltYBox.valueChanged.connect(self.tiltYChanged)
+
+        for SpinBox in [self.tiltXBox, self.tiltYBox]:
+            SpinBox.setMinimum(-20.0)
+            SpinBox.setSingleStep(0.1)
 
         self.focusBox = QDoubleSpinBox(self)
         self.focusBox.setRange(-3.0, 3.0)
@@ -963,17 +974,28 @@ class SLM_Controller(QGroupBox):
         hbox014.addWidget(self.focusXBox)
         hbox014.addWidget(self.focusYBox)
 
+        RotationGroup = QGroupBox("Rotation", self)
+        RotationLayout = QVBoxLayout()
+        RotationGroup.setLayout(RotationLayout)
+        RotationLayout.addWidget(self.SLMDial)
+        RotationLayout.addWidget(self.rotationBox)
         vbox00 = QVBoxLayout()
-        vbox00.addStretch()
-        setListToLayout(vbox00, [QLabel("Rotation"), self.SLMDial, self.rotationBox])
-        vbox00.addStretch()
+        vbox00.addWidget(RotationGroup)
+
+        TiltBox = QGroupBox("Tilt", self)
+        TiltLayout = QHBoxLayout()
+        TiltBox.setLayout(TiltLayout)
+        TiltLayout.addLayout(LHLayout("x:", self.tiltXBox))
+        TiltLayout.addLayout(LHLayout("y:", self.tiltYBox))
+        vbox00.addWidget(TiltBox)
 
         vbox01 = QVBoxLayout()
         setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
+        hbox0.addSpacing(20)
+        hbox0.addLayout(vbox00)
 
         self.setTitle("SLM Controller")
 
@@ -989,6 +1011,8 @@ class SLM_Controller(QGroupBox):
         self.focus = 0
         self.focusX = 396
         self.focusY = 300
+        self.tiltX = 0
+        self.tiltY = 0
 
     def switch_SLM(self, checked):
         if checked:
@@ -1013,7 +1037,8 @@ class SLM_Controller(QGroupBox):
         y = np.arange(600)
         X, Y = np.meshgrid(x, y)
         focusCorrection = ((X - self.focusX)**2 + (Y - self.focusY)**2)*self.focus*1e-2
-        self.base = self.correction + focusCorrection.astype(np.uint8)
+        tiltCorrection = self.tiltX*X + self.tiltY*Y
+        self.base = self.correction + tiltCorrection + focusCorrection.astype(np.uint8)
 
     def init_img(self):
         img = self.base.astype(np.float) * self.alpha / 256
@@ -1040,17 +1065,25 @@ class SLM_Controller(QGroupBox):
             self.init_img()
             self.w.update_SLM()
 
+    def tiltXChanged(self, val):
+        self.tiltX = val
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    def tiltYChanged(self, val):
+        self.tiltY = val
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
     def focusChanged(self, val):
         self.focus = self.focusBox.value()
         self.focusX = self.focusXBox.value()+396
         self.focusY = self.focusYBox.value()+300
         self.make_base()
         if self.SLMButton.isChecked():
-            if self.modulateButton.isChecked():
-                self.update_img()
-            else:
-                self.init_img()
-                self.w.update_SLM()
+            self.modulate_SLM(self.modulateButton.isChecked())
 
 
 class DIOWidget(QGroupBox):
