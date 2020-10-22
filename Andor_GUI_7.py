@@ -304,6 +304,8 @@ def setListToLayout(layout, list):
         else:
             layout.addWidget(object)
 
+
+# Layout of labeled widget
 class LHLayout(QHBoxLayout):
     def __init__(self, label, object, parent=None):
         super(QHBoxLayout, self).__init__(parent)
@@ -316,7 +318,7 @@ class LHLayout(QHBoxLayout):
             self.addWidget(object)
 
 
-class OwnImageWidget(QWidget):
+class MyImageWidget(QWidget):
     posSignal = QtCore.pyqtSignal(QtCore.QPoint)
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -345,7 +347,7 @@ class PosLabeledImageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.imageWidget = OwnImageWidget(self)
+        self.imageWidget = MyImageWidget(self)
         self.posLabel = QLabel("Position:")
 
         vbox = QVBoxLayout(self)
@@ -363,7 +365,7 @@ class PosLabeledImageWidget(QWidget):
 class SLMWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.canvas = OwnImageWidget(self)
+        self.canvas = MyImageWidget(self)
         self.img = None
 
     def update_SLM(self):
@@ -382,16 +384,17 @@ class contWidget(QWidget):
 
     def initUI(self):
         self.imgMaxBox = QLineEdit(self)
-        self.imgMaxBox.setReadOnly(True)
-        self.imgMaxBox.setSizePolicy((QSizePolicy(5, 0)))
         self.imgMinBox = QLineEdit(self)
+        self.imgMaxBox.setReadOnly(True)
         self.imgMinBox.setReadOnly(True)
+        self.imgMaxBox.setSizePolicy((QSizePolicy(5, 0)))
         self.imgMinBox.setSizePolicy((QSizePolicy(5, 0)))
+
         self.markerPositionBoxX = QSpinBox(self)
-        self.markerPositionBoxX.setMaximum(400)
-        self.markerPositionBoxX.setMinimum(-400)
         self.markerPositionBoxY = QSpinBox(self)
+        self.markerPositionBoxX.setMaximum(400)
         self.markerPositionBoxY.setMaximum(400)
+        self.markerPositionBoxX.setMinimum(-400)
         self.markerPositionBoxY.setMinimum(-400)
         self.markerFactorBox = QSpinBox(self)
         self.markerFactorBox.setRange(0, 9999)
@@ -401,12 +404,12 @@ class contWidget(QWidget):
 
     def initLayout(self):
 
-        hbox00 = QVBoxLayout()
-        ImageBox = QGroupBox("Raw Image", self)
-        ImageBox.setLayout(hbox00)
-        setListToLayout(hbox00, [LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
+        RawImgLayout = QVBoxLayout()
+        RawImgGroup = QGroupBox("Raw Image", self)
+        RawImgGroup.setLayout(RawImgLayout)
+        setListToLayout(RawImgLayout, [LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
-        hbox01 = QVBoxLayout()
+        MarkerLayout = QVBoxLayout()
         posLayout = QGridLayout()
         posLayout.addWidget(QLabel("Position"), 0, 0)
         posLayout.addLayout(LHLayout('x: ', self.markerPositionBoxX), 0, 1)
@@ -414,14 +417,14 @@ class contWidget(QWidget):
         splitLayout = QHBoxLayout()
         splitLayout.addWidget(self.splitButton)
         splitLayout.addLayout(LHLayout('factor: ', self.markerFactorBox))
-        MarkerBox = QGroupBox("Marker", self)
-        MarkerBox.setLayout(hbox01)
-        setListToLayout(hbox01, [posLayout, splitLayout])
+        MarkerGroup = QGroupBox("Marker", self)
+        MarkerGroup.setLayout(MarkerLayout)
+        setListToLayout(MarkerLayout, [posLayout, splitLayout])
 
-        hbox0 = QHBoxLayout(self)
-        setListToLayout(hbox0, [ImageBox, MarkerBox])
-        hbox0.setStretch(0, 1)
-        hbox0.setStretch(1, 1)
+        MainLayout = QHBoxLayout(self)
+        setListToLayout(MainLayout, [RawImgGroup, MarkerGroup])
+        MainLayout.setStretch(0, 1)
+        MainLayout.setStretch(1, 1)
 
 
 class fixedWidget(QWidget):
@@ -455,36 +458,36 @@ class fixedWidget(QWidget):
         self.initLayout()
 
     def initLayout(self):
-        hbox00 = QGridLayout()
-        hbox00.addWidget(QLabel("Frames:"), 0, 0)
-        hbox00.addWidget(self.numImgBox, 0, 1)
-        hbox00.addWidget(QLabel("Frame Rate:"), 1, 0)
-        hbox00.addWidget(self.frameRateBox, 1, 1)
+        leftGridLayout = QGridLayout()
+        leftGridLayout.addWidget(QLabel("Frames:"), 0, 0)
+        leftGridLayout.addWidget(self.numImgBox, 0, 1)
+        leftGridLayout.addWidget(QLabel("Frame Rate:"), 1, 0)
+        leftGridLayout.addWidget(self.frameRateBox, 1, 1)
         dirLayout = QHBoxLayout()
         dirLayout.addWidget(self.dirBox)
         dirLayout.addWidget(self.dirButton)
-        hbox00.addWidget(QLabel("Directory:"), 2, 0)
-        hbox00.addLayout(dirLayout, 2, 1)
-        hbox00.addWidget(QLabel("Current Frame:"), 3, 0)
-        hbox00.addWidget(self.countBox, 3, 1)
-        hbox00.setColumnStretch(0, 1)
-        hbox00.setColumnStretch(1, 1)
+        leftGridLayout.addWidget(QLabel("Directory:"), 2, 0)
+        leftGridLayout.addLayout(dirLayout, 2, 1)
+        leftGridLayout.addWidget(QLabel("Current Frame:"), 3, 0)
+        leftGridLayout.addWidget(self.countBox, 3, 1)
+        leftGridLayout.setColumnStretch(0, 1)
+        leftGridLayout.setColumnStretch(1, 1)
 
-        hbox01 = QGridLayout()
+        rightGridLayout = QGridLayout()
         i = 0
         for label, widget in [("Feedback:", self.aqTypeBox), ("Potential Center:", self.cntrPosBox), ("Threshold: ", self.thresBox)]:
-            hbox01.addWidget(QLabel(label), i, 0)
-            hbox01.addWidget(widget, i, 1)
+            rightGridLayout.addWidget(QLabel(label), i, 0)
+            rightGridLayout.addWidget(widget, i, 1)
             i += 1
-        hbox01.addWidget(self.specialButton, 3, 0)
-        hbox01.addWidget(self.currentRepeatBox, 3, 1)
-        hbox01.setColumnStretch(0, 1)
-        hbox01.setColumnStretch(1, 1)
+        rightGridLayout.addWidget(self.specialButton, 3, 0)
+        rightGridLayout.addWidget(self.currentRepeatBox, 3, 1)
+        rightGridLayout.setColumnStretch(0, 1)
+        rightGridLayout.setColumnStretch(1, 1)
 
-        vbox0 = QHBoxLayout(self)
-        vbox0.addLayout(hbox00)
-        vbox0.addSpacing(20)
-        vbox0.addLayout(hbox01)
+        mainLayout = QHBoxLayout(self)
+        mainLayout.addLayout(leftGridLayout)
+        mainLayout.addSpacing(20)
+        mainLayout.addLayout(rightGridLayout)
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -503,13 +506,13 @@ class AOISettingBox(QGroupBox):
         self.AOISizeBox = QComboBox(self)
         AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128']
         self.AOISizeBox.addItems(AOISizeList)
+
         self.CenterXBox = QSpinBox(self)
         self.CenterYBox = QSpinBox(self)
         self.CenterXBox.setMinimum(-1024)
         self.CenterYBox.setMinimum(-1024)
         self.CenterXBox.setMaximum(1024)
         self.CenterYBox.setMaximum(1024)
-
 
         self.customCheck = QRadioButton("Customized")
 
@@ -531,21 +534,23 @@ class AOISettingBox(QGroupBox):
         defaultLayout = QVBoxLayout()
         defaultLayout.addWidget(self.defaultCheck)
         defaultLayout.addLayout(LHLayout("Size:", self.AOISizeBox))
-        dHLayout = QHBoxLayout()
-        setListToLayout(dHLayout, [LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
-        defaultLayout.addLayout(dHLayout)
+        defaultCenterLayout = QHBoxLayout()
+        setListToLayout(defaultCenterLayout, [LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
+        defaultLayout.addLayout(defaultCenterLayout)
+
         customLayout = QVBoxLayout()
         customLayout.addWidget(self.customCheck)
-        cLayout = QGridLayout()
-        cLayout.addLayout(LHLayout("Left: ", self.AOILeftBox), 0, 1)
-        cLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
-        cLayout.addLayout(LHLayout("Width: ", self.AOIWidthBox), 1, 0)
-        cLayout.addLayout(LHLayout("Height: ", self.AOIHeightBox), 1, 1)
-        customLayout.addLayout(cLayout)
-        layout = QHBoxLayout(self)
-        layout.addLayout(defaultLayout)
-        layout.addSpacing(20)
-        layout.addLayout(customLayout)
+        customParamsLayout = QGridLayout()
+        customParamsLayout.addLayout(LHLayout("Left: ", self.AOILeftBox), 0, 1)
+        customParamsLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
+        customParamsLayout.addLayout(LHLayout("Width: ", self.AOIWidthBox), 1, 0)
+        customParamsLayout.addLayout(LHLayout("Height: ", self.AOIHeightBox), 1, 1)
+        customLayout.addLayout(customParamsLayout)
+
+        MainLayout = QHBoxLayout(self)
+        MainLayout.addLayout(defaultLayout)
+        MainLayout.addSpacing(20)
+        MainLayout.addLayout(customLayout)
 
 class AcquisitionWidget(QWidget):
 
@@ -572,7 +577,6 @@ class AcquisitionWidget(QWidget):
         self.exposeTBox = QDoubleSpinBox(self)
         self.exposeTBox.setDecimals(5)
 
-
         self.AOIBinBox = QComboBox(self)
         AOIBinList = ["1x1", "2x2", "3x3", "4x4", "8x8"]
         self.AOIBinBox.addItems(AOIBinList)
@@ -581,32 +585,25 @@ class AcquisitionWidget(QWidget):
 
         self.initButton = QPushButton("CONNECT", self)
         self.applyButton = QPushButton('APPLY', self)
-        self.runButton = QPushButton('RUN', self)
-        self.finButton = QPushButton("DISCONNECT", self)
         self.applyButton.setEnabled(False)
+        self.runButton = QPushButton('RUN', self)
         self.runButton.setCheckable(True)
         self.runButton.setEnabled(False)
+        self.finButton = QPushButton("DISCONNECT", self)
         self.finButton.setEnabled(False)
 
         self.initLayout()
 
     def initLayout(self):
-        hbox00 = QHBoxLayout()
-        setListToLayout(hbox00, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
+        topLayout = QHBoxLayout()
+        setListToLayout(topLayout, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
                                  LHLayout("Binnng: ", self.AOIBinBox), self.globalClearButton])
 
-        # AOILayout = QHBoxLayout()
-        # self.AOIGroupBox.setLayout(AOILayout)
-        # setListToLayout(AOILayout, [LHLayout("Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
-        #                          LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
-        #                          LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
-        #                          LHLayout("Y: ", self.CenterYBox)])
+        bottomLayout = QHBoxLayout()
+        setListToLayout(bottomLayout, [self.initButton, self.applyButton, self.runButton, self.finButton])
 
-        hbox03 = QHBoxLayout()
-        setListToLayout(hbox03, [self.initButton, self.applyButton, self.runButton, self.finButton])
-
-        vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [hbox00, self.AOI, self.Tab, hbox03])
+        mainLayout = QVBoxLayout(self)
+        setListToLayout(mainLayout, [topLayout, self.AOI, self.Tab, bottomLayout])
 
     def setAOISize(self, id):
         if  id == 1:
@@ -660,21 +657,20 @@ class imageLoader(QWidget):
         self.initLayout()
 
     def initLayout(self):
-        hbox01 = QHBoxLayout()
-        hbox01.addLayout(LHLayout("Frames: ", self.fileNumBox))
-        hbox01.addLayout(LHLayout("Current Frame: ", self.currentNumBox))
+        centerLayout = QGridLayout()
+        centerLayout.addLayout(LHLayout("Frames: ", self.fileNumBox), 0, 0)
+        centerLayout.addLayout(LHLayout("Current Frame: ", self.currentNumBox), 0, 1)
+        centerLayout.addLayout(LHLayout("Min: ", self.imgMinBox), 1, 0)
+        centerLayout.addLayout(LHLayout("Max: ", self.imgMaxBox), 1, 1)
+        centerLayout.addLayout(LHLayout("Start: ", self.anlzStartBox), 2, 0)
+        centerLayout.addLayout(LHLayout("End: ", self.anlzEndBox), 2, 1)
 
-        hbox02 = QHBoxLayout()
-        hbox02.addLayout(LHLayout("Min: ", self.imgMinBox))
-        hbox02.addLayout(LHLayout("Max: ", self.imgMaxBox))
-
-        hbox03 = QHBoxLayout()
-        hbox03.addWidget(self.anlzButton)
-        hbox03.addLayout(LHLayout("Start: ", self.anlzStartBox))
-        hbox03.addLayout(LHLayout("End: ", self.anlzEndBox))
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.anlzButton)
+        bottomLayout.addWidget(self.progressBar)
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), hbox01, hbox02, hbox03, self.progressBar])
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, bottomLayout])
 
     def initVal(self):
         self.dirname = None
@@ -749,7 +745,6 @@ class imageLoader(QWidget):
         bpl = bpc * width
         image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
         window.central.ImgWidget.setImage(image)
-
 
     def update_img(self):
         if self.old:
@@ -853,7 +848,6 @@ class processWidget(QGroupBox):
         #
         # gbox.addWidget(self.contButton, 3, 0)
         # gbox.addLayout(LHLayout("Number to Find: ", self.contNum), 3, 3)
-
 
         hbox000 = QHBoxLayout()
         setListToLayout(hbox000, [self.normButton, LHLayout("Min: ", self.normMin),\
@@ -1482,7 +1476,6 @@ class centralWidget(QWidget):
             self.dst[n] = dst.astype(np.uint16).tolist()
 
     def update_frame(self, source):
-
         img_height = source.height
         img_width = source.width
         img = source.img
@@ -1528,7 +1521,7 @@ class centralWidget(QWidget):
                 self.acquisitionWidget.runButton.setText("STOP")
                 self.imageAcquirer.start()
 
-            elif self.acquisitionWidget.Tab.currentIndex() == 1:
+            else:
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
                     if self.specialPrms["piezoCheck"]:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
@@ -1611,16 +1604,6 @@ class centralWidget(QWidget):
                                                  DIOhandle=self.DIOhandle, mode=2)
                         self.applyProcessSettings()
                         self.imageAcquirer.start()
-            # else:
-            #     if self.imageLoader.dirname:
-            #         self.applyProcessSettings()
-            #         self.imagePlayer.setup()
-            #         self.acquisitionWidget.runButton.setText('STOP')
-            #         self.imagePlayer.run()
-            #     else:
-            #         logging.error('No directory selected!')
-            #         self.acquisitionWidget.runButton.setChecked(False)
-
         else:
             self.imageAcquirer.stopDll.value = True
             self.imageAcquirer.stopped = True
@@ -1752,7 +1735,6 @@ class centralWidget(QWidget):
 
     def exportSeries(self):
         dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
-        logging.debug(dirToSave)
         if dirToSave:
             start = self.imageLoader.anlzStartBox.value()
             end = self.imageLoader.anlzEndBox.value()
@@ -1859,14 +1841,6 @@ class centralWidget(QWidget):
     def sensorCooling(self, isChecked):
         dll.SetBool(self.Handle, "SensorCooling", isChecked)
 
-    def testPiezo(self):
-        ID = dll.initPiezo()
-        dll.setPiezoServo(ID, ct.c_int(True))
-        pos = ct.c_double()
-        uni = np.random.uniform()
-        dll.testPiezo(ID, ct.c_double(6.0+uni), ct.byref(pos))
-        logging.debug("pos: " + str(pos.value))
-        dll.finPiezo(ID)
 
 class mainWindow(QMainWindow):
 
