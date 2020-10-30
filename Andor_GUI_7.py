@@ -1730,8 +1730,12 @@ class centralWidget(QWidget):
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
         logging.info("Save picture: "+fileToSave[0])
-        if fileToSave:
-            cv2.imwrite(fileToSave[0], self.imageLoader.img)
+        if fileToSave[0]:
+            if self.modeTab.currentIndex() == 0:
+                img = self.imageAcquirer.img
+            else:
+                img = self.imageLoader.img
+            cv2.imwrite(fileToSave[0], img)
 
     def exportSeries(self):
         dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
@@ -1865,14 +1869,13 @@ class mainWindow(QMainWindow):
         fileMenu.addAction(expSAct)
         fileMenu.addAction(exitAct)
 
-        # self.setGeometry(100, 100, 1200, 800)
         self.setWindowTitle('Andor_CMOS')
 
         self.show()
 
     def closeEvent(self, event):
         if not self.central.fin:
-                self.central.finalizeCamera()
+            self.central.finalizeCamera()
         self.central.writeSettings()
         dll.FinaliseLibrary()
         dll.FinaliseUtilityLibrary()
