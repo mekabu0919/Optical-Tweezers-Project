@@ -570,7 +570,7 @@ class AcquisitionWidget(QWidget):
         self.Tab.addTab(self.fixedWidget, 'Recording')
 
         self.initUI()
-        self.AOI.AOIButtons.idClicked.connect(self.setAOISize)
+        # self.AOI.AOIButtons.buttonClicked.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -607,18 +607,17 @@ class AcquisitionWidget(QWidget):
         mainLayout = QVBoxLayout(self)
         setListToLayout(mainLayout, [topLayout, self.AOI, self.Tab, bottomLayout])
 
-    def setAOISize(self, id):
-        logging.debug(id)
-        if id == 1:
-            self.AOIWidth = self.AOI.AOIWidthBox.value()
-            self.AOIHeight = self.AOI.AOIHeightBox.value()
-            logging.debug("id=1")
-        else:
-            index = self.AOI.AOISizeBox.currentIndex()
-            val = 2048/(2**index)
-            logging.debug("id=0")
-            self.AOIWidth = val
-            self.AOIHeight = val
+    # def setAOISize(self, button):
+    #     if button is self.AOI.customCheck:
+    #         self.AOIWidth = self.AOI.AOIWidthBox.value()
+    #         self.AOIHeight = self.AOI.AOIHeightBox.value()
+    #         logging.debug("id=1")
+    #     else:
+    #         index = self.AOI.AOISizeBox.currentIndex()
+    #         val = 2048/(2**index)
+    #         logging.debug("id=0")
+    #         self.AOIWidth = val
+    #         self.AOIHeight = val
 
 
 class imageLoader(QWidget):
@@ -1643,6 +1642,9 @@ class centralWidget(QWidget):
         isDefault = self.acquisitionWidget.AOI.defaultCheck.isChecked()
         if isDefault:
             index = self.acquisitionWidget.AOI.AOISizeBox.currentIndex()
+            val = 2048/(2**index)
+            self.acquisitionWidget.AOIWidth = val
+            self.acquisitionWidget.AOIHeight = val
             if index == 0:
                 if dll.SetInt(self.Handle, "AOIWidth", 2048):
                     logging.error("AOIWidth")
@@ -1651,6 +1653,8 @@ class centralWidget(QWidget):
             else:
                 self.setAOICenter()
         else:
+            self.acquisitionWidget.AOIWidth = self.AOI.AOIWidthBox.value()
+            self.acquisitionWidget.AOIHeight = self.AOI.AOIHeightBox.value()
             if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOI.AOIWidthBox.value()):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOI.AOILeftBox.value()):
