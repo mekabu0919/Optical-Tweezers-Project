@@ -269,6 +269,8 @@ class ImageProcessor(QtCore.QThread):
                 ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
                 dll.processImage(point, self.height, self.width, ImgArry, self.prms)
                 pointlst.append([point[0], point[1]])
+                ## z-position detection
+
                 self.pBar.setValue(i)
             DF = pd.DataFrame(np.array(pointlst))
             DF.columns = ['x', 'y']
@@ -568,7 +570,7 @@ class AcquisitionWidget(QWidget):
         self.Tab.addTab(self.fixedWidget, 'Recording')
 
         self.initUI()
-        self.AOI.AOIButtons.buttonClicked.connect(self.setAOISize)
+        self.AOI.AOIButtons.idClicked.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -606,12 +608,15 @@ class AcquisitionWidget(QWidget):
         setListToLayout(mainLayout, [topLayout, self.AOI, self.Tab, bottomLayout])
 
     def setAOISize(self, id):
-        if  id == 1:
+        logging.debug(id)
+        if id == 1:
             self.AOIWidth = self.AOI.AOIWidthBox.value()
             self.AOIHeight = self.AOI.AOIHeightBox.value()
+            logging.debug("id=1")
         else:
             index = self.AOI.AOISizeBox.currentIndex()
             val = 2048/(2**index)
+            logging.debug("id=0")
             self.AOIWidth = val
             self.AOIHeight = val
 
