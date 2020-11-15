@@ -1236,11 +1236,11 @@ class SpecialMeasurementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        self.mode = 0
         self.start = 0
         self.end = 0
         self.step = 0
         self.num = 0
-        self.piezoCheck = False
 
         self.repeat = 0
         self.repeatCheck = False
@@ -1251,6 +1251,13 @@ class SpecialMeasurementDialog(QDialog):
         self.stepBox = QDoubleSpinBox(self)
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
+
+        self.tiltCheckBox = QRadioButton("Tilt Measurement", self)
+        self.tiltStartBox = QDoubleSpinBox(self)
+        self.tiltEndBox = QDoubleSpinBox(self)
+        self.tiltStepBox = QDoubleSpinBox(self)
+        self.tiltStepBox.setDecimals(3)
+        self.tiltNumBox = QSpinBox(self)
 
         self.repeatCheckBox = QRadioButton("Cycle Measurement", self)
         self.repeatBox = QSpinBox(self)
@@ -1271,22 +1278,35 @@ class SpecialMeasurementDialog(QDialog):
                                 LHLayout("End (um):", self.endBox), LHLayout("Step (um):", self.stepBox),\
                                 LHLayout("Number of each condition:", self.numBox)])
 
+        hbox4 = QHBoxLayout()
+        setListToLayout(hbox4, [self.tiltCheckBox, LHLayout("Start (um):", self.tiltStartBox),\
+                                LHLayout("End (um):", self.tiltEndBox), LHLayout("Step (um):", self.tiltStepBox),\
+                                LHLayout("Number of each condition:", self.tiltNumBox)])
+
         hbox3 = QHBoxLayout()
         hbox3.addWidget(self.repeatCheckBox)
         hbox3.addLayout(LHLayout("Cycle:", self.repeatBox))
 
         vbox = QVBoxLayout(self)
-        setListToLayout(vbox, [hbox2, hbox3, hbox])
+        setListToLayout(vbox, [hbox2, hbox4, hbox3, hbox])
 
     def applySettings(self):
-        self.piezoCheck = self.piezoCheckBox.isChecked()
-        self.start = self.startBox.value()
-        self.end = self.endBox.value()
-        self.step = self.stepBox.value()
-        self.num = self.numBox.value()
+        if self.piezoCheckBox.isChecked():
+            self.mode = 1
+            self.start = self.startBox.value()
+            self.end = self.endBox.value()
+            self.step = self.stepBox.value()
+            self.num = self.numBox.value()
+        elif self.tiltCheckBox.isChecked():
+            self.mode = 2
+            self.start = self.tiltStartBox.value()
+            self.end = self.tiltEndBox.value()
+            self.step = self.tiltStepBox.value()
+            self.num = self.tiltNumBox.value()
+
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
-        return {"piezoCheck": self.piezoCheck, "start": self.start, "end": self.end,\
+        return {"mode": self.mode, "start": self.start, "end": self.end,\
                 "step": self.step, "num": self.num, "repeatCheck": self.repeatCheck, "repeat": self.repeat}
 
 
@@ -1527,7 +1547,7 @@ class centralWidget(QWidget):
 
             else:
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
-                    if self.specialPrms["piezoCheck"]:
+                    if self.specialPrms["mode"] == 1:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
@@ -1553,6 +1573,8 @@ class centralWidget(QWidget):
                             count_p = ct.pointer(count)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
+                    elif self.specialPrms["mode"] == 2:
+                        pass
                     elif self.specialPrms["repeatCheck"]:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
