@@ -1574,7 +1574,31 @@ class centralWidget(QWidget):
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                     elif self.specialPrms["mode"] == 2:
-                        pass
+                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                        num = self.specialPrms["num"]
+                        logging.info('Acquisition start')
+                        positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        for pos in positions:
+                            self.SLM_Controller.tiltXChanged(pos)
+                            waitTime = time.time()
+                            while True:
+                                now = time.time()
+                                if (now - 3) > waitTime:
+                                    break
+                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
+                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                                     num=ct.c_int(num), count_p=count_p)
+                            self.imageAcquirer.start()
+                            ref = count.value
+                            while not self.imageAcquirer.stopped:
+                                if count.value > (ref + 5):
+                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                                    QApplication.processEvents()
+                                    ref = count.value
+                            count = ct.c_int(0)
+                            count_p = ct.pointer(count)
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
                     elif self.specialPrms["repeatCheck"]:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
