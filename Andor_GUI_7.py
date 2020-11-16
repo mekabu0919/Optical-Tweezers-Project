@@ -1241,6 +1241,7 @@ class SpecialMeasurementDialog(QDialog):
         self.end = 0
         self.step = 0
         self.num = 0
+        self.tiltXY = 0
 
         self.repeat = 0
         self.repeatCheck = False
@@ -1258,6 +1259,8 @@ class SpecialMeasurementDialog(QDialog):
         self.tiltStepBox = QDoubleSpinBox(self)
         self.tiltStepBox.setDecimals(3)
         self.tiltNumBox = QSpinBox(self)
+        self.tiltXYBox = QComboBox(self)
+        self.tiltXYBox.addItems(["X", "Y"])
 
         self.repeatCheckBox = QRadioButton("Cycle Measurement", self)
         self.repeatBox = QSpinBox(self)
@@ -1279,9 +1282,9 @@ class SpecialMeasurementDialog(QDialog):
                                 LHLayout("Number of each condition:", self.numBox)])
 
         hbox4 = QHBoxLayout()
-        setListToLayout(hbox4, [self.tiltCheckBox, LHLayout("Start (um):", self.tiltStartBox),\
-                                LHLayout("End (um):", self.tiltEndBox), LHLayout("Step (um):", self.tiltStepBox),\
-                                LHLayout("Number of each condition:", self.tiltNumBox)])
+        setListToLayout(hbox4, [self.tiltCheckBox, LHLayout("Start :", self.tiltStartBox),\
+                                LHLayout("End :", self.tiltEndBox), LHLayout("Step :", self.tiltStepBox),\
+                                LHLayout("Number of each condition:", self.tiltNumBox), self.tiltXYBox])
 
         hbox3 = QHBoxLayout()
         hbox3.addWidget(self.repeatCheckBox)
@@ -1303,11 +1306,13 @@ class SpecialMeasurementDialog(QDialog):
             self.end = self.tiltEndBox.value()
             self.step = self.tiltStepBox.value()
             self.num = self.tiltNumBox.value()
+            self.tiltXY = self.tiltXYBox.currentIndex()
 
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
         return {"mode": self.mode, "start": self.start, "end": self.end,\
-                "step": self.step, "num": self.num, "repeatCheck": self.repeatCheck, "repeat": self.repeat}
+                "step": self.step, "num": self.num, "tiltXY": self.tiltXY,\
+                "repeatCheck": self.repeatCheck, "repeat": self.repeat}
 
 
 class centralWidget(QWidget):
@@ -1578,8 +1583,12 @@ class centralWidget(QWidget):
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
                         positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        XY = self.specialPrms["tiltXY"]
                         for pos in positions:
-                            self.SLM_Controller.tiltXChanged(pos)
+                            if XY == 0:
+                                self.SLM_Controller.tiltXChanged(pos)
+                            else:
+                                self.SLM_Controller.tiltYChanged(pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
