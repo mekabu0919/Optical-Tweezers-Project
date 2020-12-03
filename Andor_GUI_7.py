@@ -1708,8 +1708,8 @@ class centralWidget(QWidget):
             else:
                 self.setAOICenter()
         else:
-            self.acquisitionWidget.AOIWidth = self.AOI.AOIWidthBox.value()
-            self.acquisitionWidget.AOIHeight = self.AOI.AOIHeightBox.value()
+            self.acquisitionWidget.AOIWidth = self.acquisitionWidget.AOI.AOIWidthBox.value()
+            self.acquisitionWidget.AOIHeight = self.acquisitionWidget.AOI.AOIHeightBox.value()
             if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOI.AOIWidthBox.value()):
                 logging.error("AOIWidth")
             if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOI.AOILeftBox.value()):
