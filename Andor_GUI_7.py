@@ -956,6 +956,10 @@ class SLM_Controller(QGroupBox):
         self.focusXBox.valueChanged.connect(self.focusChanged)
         self.focusYBox.valueChanged.connect(self.focusChanged)
 
+        self.alignmentToolButton = QPushButton("Alignment Tool", self)
+        self.alignmentToolButton.setCheckable(True)
+        self.alignmentToolButton.toggled.connect(self.switchMask)
+
         self.initLayout()
 
     def initLayout(self):
@@ -988,7 +992,7 @@ class SLM_Controller(QGroupBox):
         vbox00.addWidget(TiltBox)
 
         vbox01 = QVBoxLayout()
-        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014, self.alignmentToolButton])
 
         hbox0 = QHBoxLayout(self)
         hbox0.addLayout(vbox01)
@@ -1011,6 +1015,7 @@ class SLM_Controller(QGroupBox):
         self.focusY = 300
         self.tiltX = 0
         self.tiltY = 0
+        self.mask = 0
 
     def switch_SLM(self, checked):
         if checked:
@@ -1036,7 +1041,7 @@ class SLM_Controller(QGroupBox):
         X, Y = np.meshgrid(x, y)
         focusCorrection = ((X - self.focusX)**2 + (Y - self.focusY)**2)*self.focus*1e-2
         tiltCorrection = self.tiltX*X + self.tiltY*Y
-        self.base = self.correction + tiltCorrection + focusCorrection.astype(np.uint8)
+        self.base = self.correction + tiltCorrection + focusCorrection.astype(np.uint8) + self.mask
 
     def init_img(self):
         img = self.base.astype(np.float) * self.alpha / 256
@@ -1083,6 +1088,22 @@ class SLM_Controller(QGroupBox):
         if self.SLMButton.isChecked():
             self.modulate_SLM(self.modulateButton.isChecked())
 
+    def switchMask(self, checked):
+        if checked:
+            x = np.arange(792)
+            y = np.arange(600)
+            X, Y = np.meshgrid(x, y)
+            pitch = 2
+
+            img = ((X // pitch + Y // pitch) % 2) * 128
+            circle = (X-396)**2 + (Y-300)**2
+            thres = circle > 50**2
+            self.mask = thres*img.astype(np.uint8)
+        else:
+            self.mask = 0
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
 
 class DIOWidget(QGroupBox):
     def __init__(self, parent=None):
