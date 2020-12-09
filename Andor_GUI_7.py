@@ -956,6 +956,11 @@ class SLM_Controller(QGroupBox):
         self.focusXBox.valueChanged.connect(self.focusChanged)
         self.focusYBox.valueChanged.connect(self.focusChanged)
 
+        self.aspectBox = QDoubleSpinBox(self)
+        self.aspectBox.setDecimals(3)
+        self.aspectBox.setSingleStep(0.01)
+        self.aspectBox.valueChanged.connect(self.aspectChanged)
+
         self.initLayout()
 
     def initLayout(self):
@@ -988,7 +993,7 @@ class SLM_Controller(QGroupBox):
         vbox00.addWidget(TiltBox)
 
         vbox01 = QVBoxLayout()
-        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014, LHLayout("Aspect Ratio", self.aspectBox)])
 
         hbox0 = QHBoxLayout(self)
         hbox0.addLayout(vbox01)
@@ -1011,6 +1016,7 @@ class SLM_Controller(QGroupBox):
         self.focusY = 300
         self.tiltX = 0
         self.tiltY = 0
+        self.aspectRatio = 1.0
 
     def switch_SLM(self, checked):
         if checked:
@@ -1031,10 +1037,10 @@ class SLM_Controller(QGroupBox):
         self.alpha = self.alphaList[index]
 
     def make_base(self):
-        x = np.arange(792)
-        y = np.arange(600)
+        x = (np.arange(792)-self.focusX)*self.aspectRatio
+        y = np.arange(600)-self.focusY
         X, Y = np.meshgrid(x, y)
-        focusCorrection = ((X - self.focusX)**2 + (Y - self.focusY)**2)*self.focus*1e-2
+        focusCorrection = (X**2 + Y**2)*self.focus*1e-2
         tiltCorrection = self.tiltX*X + self.tiltY*Y
         self.base = self.correction + tiltCorrection + focusCorrection.astype(np.uint8)
 
@@ -1043,7 +1049,7 @@ class SLM_Controller(QGroupBox):
         self.w.img = img.astype(np.uint8)
 
     def update_img(self):
-        x = np.arange(792)
+        x = np.arange(792)*self.aspectRatio
         y = np.arange(600)
         X, Y = np.meshgrid(x, y)
 
@@ -1079,6 +1085,12 @@ class SLM_Controller(QGroupBox):
         self.focus = self.focusBox.value()
         self.focusX = self.focusXBox.value()+396
         self.focusY = self.focusYBox.value()+300
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    def aspectChanged(self, val):
+        self.aspectRatio = self.aspectBox.value()
         self.make_base()
         if self.SLMButton.isChecked():
             self.modulate_SLM(self.modulateButton.isChecked())
@@ -1865,6 +1877,7 @@ class centralWidget(QWidget):
         self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
         self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
         self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
+        self.SLM_Controller.aspectBox.setValue(settings.value('SLM aspect', 1, type=float))
 
     def writeSettings(self):  # Save current settings
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1894,6 +1907,7 @@ class centralWidget(QWidget):
         self.settings.setValue('SLM focus', self.SLM_Controller.focusBox.value())
         self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
         self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
+        self.settings.setValue('SLM aspect', self.SLM_Controller.aspectBox.value())
 
     def showTemperature(self):
         temp = ct.c_double()
