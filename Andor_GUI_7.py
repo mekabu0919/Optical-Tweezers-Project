@@ -106,12 +106,14 @@ class ImageAcquirer(QtCore.QThread):
         self.stopDll = ct.c_bool(False)
         self.mutex = QtCore.QMutex()
 
-    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **prms):
+    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **args):
         self.Handle = Handle
         self.dir = dir
         self.fixed = fixed
         self.mode = mode
-        self.prms = prms
+        self.args = args
+        self.areaIsSelected = False
+        self.selectedAreas = []
         self.stop
         if center is None:
             self.center = (ct.c_float*2)(0.0, 0.0)
@@ -130,13 +132,13 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], ct.byref(self.stopDll))
+                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.args["num"], self.args["count_p"], ct.byref(self.stopDll))
             elif self.mode==1:
                 self.prepareAcquisition()
             elif self.mode==2:
                 self.feedbackedAcquisition()
             else:
-                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms["piezoID"])
+                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.args["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -174,6 +176,9 @@ class ImageAcquirer(QtCore.QThread):
                                      outBuffer, ct.byref(maxVal), ct.byref(minVal))
                 self.max, self.min = maxVal.value, minVal.value
                 self.img = np.array(outBuffer).reshape(ImageHeight.value, ImageWidth.value)
+                if self.areaIsSelected:
+                    for area in self.selectedAreas:
+                        self.img = cv2.rectangle(self.img, area[0], area[1], 127, 3)
                 self.width, self.height = ImageWidth.value, ImageHeight.value
                 self.imgSignal.emit(self)
                 dll.QueueBuffer(self.Handle, Buffer, BufferSize)
@@ -189,14 +194,14 @@ class ImageAcquirer(QtCore.QThread):
     def prepareAcquisition(self):
 
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
-        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.prms,
+        point, self.center, ct.c_float(self.args["DIOthres"]), self.args["DIOhandle"], ct.c_int(self.mode))
         self.posSignal.emit(point[0], point[1])
 
     def feedbackedAcquisition(self):
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
-        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.prms,
+        point, self.center, ct.c_float(self.args["DIOthres"]), self.args["DIOhandle"], ct.c_int(self.mode))
 
 
 class ImagePlayer(QtCore.QThread):
@@ -238,12 +243,14 @@ class ImageProcessor(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, datfiles, width, height, stride, prms, dir, pBar, old, mm=None):
+    def setup(self, datfiles, width, height, stride, prms, areaIsSelected, selectedAreas, dir, pBar, old, mm=None):
         self.datfiles = datfiles
         self.width = width
         self.height = height
         self.stride = stride
         self.prms = prms
+        self.areaIsSelected = areaIsSelected
+        self.selectedAreas = selectedAreas
         self.dir = dir
         self.pBar = pBar
         self.old = old
@@ -288,11 +295,27 @@ class ImageProcessor(QtCore.QThread):
                 rawdata = self.mm.read(imgSize)
                 buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
                 ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
-                dll.processImage(point, self.height, self.width, ImgArry, self.prms)
-                pointlst.append([point[0], point[1]])
-                self.pBar.setValue(i)
-            DF = pd.DataFrame(np.array(pointlst))
-            DF.columns = ['x', 'y']
+                if self.areaIsSelected:
+                    imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
+                    areaList = []
+                    for area in self.selectedAreas:
+                        LT, RB = area
+                        width = RB[0] - LT[0]
+                        height = RB[1] - LT[1]
+                        areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                        imgBuffer = areaImg.copy()
+                        cAreaImg = imgBuffer.ctypes.data_as(ct.POINTER(ct.c_ushort))
+                        dll.processImage(point, height, width, cAreaImg, self.prms)
+                        areaList.append([LT[0]+point[0], LT[1]+point[1]])
+                    self.pBar.setValue(i)
+                    pointlst.append(areaList)
+                else:
+                    dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                    pointlst.append([point[0], point[1]])
+                    self.pBar.setValue(i)
+            DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
+            columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
+            DF.columns = columnNames
             DF.to_csv(self.dir + r"\COG.csv")
             logging.info("analysis finished")
 
@@ -783,6 +806,9 @@ class imageLoader(QWidget):
             self.min = min.value
             self.max = max.value
             self.img = np.array(outBuffer).reshape(self.height, self.width)
+            if self.areaIsSelected:
+                for area in self.selectedAreas:
+                    self.img = cv2.rectangle(self.img, area[0], area[1], 127, 3)
             self.imgMinBox.setText(str(self.min))
             self.imgMaxBox.setText(str(self.max))
             self.imgSignal.emit(self)
@@ -825,6 +851,8 @@ class processWidget(QGroupBox):
 
         self.contButton = QRadioButton('Find Contours', self)
         self.contButton.setAutoExclusive(False)
+        self.areaSelectButton = QPushButton("Area Select")
+        self.areaSelectButton.setCheckable(True)
         self.contNum = QSpinBox(self)
         self.contNum.setRange(1,4)
 
@@ -875,6 +903,7 @@ class processWidget(QGroupBox):
 
         hbox03 = QHBoxLayout()
         hbox03.addWidget(self.contButton)
+        hbox03.addWidget(self.areaSelectButton)
         hbox03.addLayout(LHLayout("Number to Find: ", self.contNum))
 
         vbox0 = QVBoxLayout(self)
@@ -890,8 +919,11 @@ class processWidget(QGroupBox):
         blurPrms(0,0,0,0),
         thresPrms(0,0,0,0),
         contPrms(0,0))
+        self.areaIsSelected = False
+        self.selectedAreas = []
 
     def set_prm(self):
+        self.areaIsSelected = self.areaSelectButton.isChecked()
         self.prmStruct.ns = nsPrms(self.normButton.isChecked(), self.normMax.value(), self.normMin.value(), self.sigma.value())
         self.prmStruct.blur = blurPrms(self.blurButton.isChecked(), self.blurSize.value(), self.blurSize.value(), self.blurSigma.value())
         self.prmStruct.thres = thresPrms(self.thresButton.isChecked(), self.thresVal.value(), 255, self.thresType.currentIndex()+int(self.OtsuButton.isChecked())*8)
@@ -1327,6 +1359,111 @@ class SpecialMeasurementDialog(QDialog):
                 "repeatCheck": self.repeatCheck, "repeat": self.repeat}
 
 
+class AreaSelectImgWidet(MyImageWidget):
+    pressSignal = QtCore.pyqtSignal(QtCore.QPoint)
+    releasedSignal = QtCore.pyqtSignal(QtCore.QPoint)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setMouseTracking(False)
+
+    def mousePressEvent(self, event):
+        self.pressSignal.emit(event.pos())
+
+    def mouseReleaseEvent(self, event):
+        self.releasedSignal.emit(event.pos())
+
+
+class AreaSelectDialog(QDialog):
+    def __init__(self, img, parent=None):
+        super().__init__(parent)
+
+        self.imgWidget = AreaSelectImgWidet(self)
+        self.imgHeight = img.shape[0]
+        self.imgWidth = img.shape[1]
+        self.start = None
+        self.end = None
+        self.rects= []
+
+        self.imgWidget.pressSignal.connect(self.mousePressed)
+        self.imgWidget.posSignal.connect(self.mouseMoved)
+        self.imgWidget.releasedSignal.connect(self.mouseReleased)
+
+        self.applyButton = QPushButton("Apply")
+        self.clearButton = QPushButton("Clear")
+        self.cancelButton = QPushButton("Cancel")
+
+        self.applyButton.clicked.connect(self.accept)
+        self.clearButton.clicked.connect(self.clearSelection)
+        self.cancelButton.clicked.connect(self.reject)
+
+        self.setInitImage(img)
+        self.initLayout()
+
+    def initLayout(self):
+        buttonLayout = QHBoxLayout()
+        buttonLayout.addWidget(self.applyButton)
+        buttonLayout.addWidget(self.clearButton)
+        buttonLayout.addWidget(self.cancelButton)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.imgWidget)
+        layout.addLayout(buttonLayout)
+
+    def setImage(self, img):
+        height, width, bpc = img.shape
+        bpl = bpc * width
+        image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
+        self.imgWidget.setImage(image)
+
+    def setInitImage(self, img):
+        scale_w = float(600) / float(self.imgWidth)
+        scale_h = float(600) / float(self.imgHeight)
+        scale = min([scale_w, scale_h])
+        if scale == 0:
+            scale = 1
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        height, width, bpc = img.shape
+        self.height, self.width, self.img = height, width, img
+        self.setImage(img)
+
+    def mousePressed(self, point):
+        self.start = (point.x(), point.y())
+
+    def mouseMoved(self, point):
+        self.end = (point.x(), point.y())
+        self.drawRectangles()
+
+    def mouseReleased(self, point):
+        self.end = (point.x(), point.y())
+        if (self.end[0]-self.start[0])*(self.end[1]-self.start[1]):
+            self.rects.append((self.start, self.end))
+        self.start, self.end = None, None
+        self.drawRectangles()
+
+    def drawRectangles(self):
+        img = self.img.copy()
+        for rect in self.rects:
+            img = cv2.rectangle(img, rect[0], rect[1], (0,255,0), 3)
+        if self.start and self.end:
+            img = cv2.rectangle(img, self.start, self.end, (0,255,0), 3)
+        self.setImage(img)
+
+    def applyAreas(self):
+        ret = []
+        for rect in self.rects:
+            LTx, LTy = min(rect[0][0], rect[1][0]), min(rect[0][1], rect[1][1])
+            RBx, RBy = max(rect[0][0], rect[1][0]), max(rect[0][1], rect[1][1])
+            LT = (int(LTx*self.imgWidth/self.width), int(LTy*self.imgHeight/self.height))
+            RB = (int(RBx*self.imgWidth/self.width), int(RBy*self.imgHeight/self.height))
+            ret.append((LT, RB))
+        return ret
+
+    def clearSelection(self):
+        self.rects = []
+        self.drawRectangles()
+
+
 class centralWidget(QWidget):
 
     def __init__(self, parent=None):
@@ -1368,6 +1505,7 @@ class centralWidget(QWidget):
         self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
 
         self.processWidget.applyButton.clicked.connect(self.applyProcessClicked)
+        self.processWidget.areaSelectButton.toggled.connect(self.selectArea)
 
         self.DIOWidget.DIObuttons.buttonClicked[int].connect(self.writeDIO)
 
@@ -1754,7 +1892,11 @@ class centralWidget(QWidget):
     def applyProcessSettings(self, update=False):
         self.processWidget.set_prm()
         self.imageAcquirer.prms = self.processWidget.prmStruct
+        self.imageAcquirer.areaIsSelected = self.processWidget.areaIsSelected
+        self.imageAcquirer.selectedAreas = self.processWidget.selectedAreas
         self.imageLoader.prms = self.processWidget.prmStruct
+        self.imageLoader.areaIsSelected = self.processWidget.areaIsSelected
+        self.imageLoader.selectedAreas = self.processWidget.selectedAreas
         if update:
             self.imageLoader.update_img()
 
@@ -1792,7 +1934,8 @@ class centralWidget(QWidget):
             logging.info("setup")
             self.imageProcessor.setup(processfiles, self.imageLoader.width,
                                       self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.old)
+                                      self.processWidget.prmStruct, self.processWidget.areaIsSelected, self.processWidget.selectedAreas,
+                                      self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old)
             self.imageProcessor.run()
         else:
             datFile = self.imageLoader.dirname +"/spool.dat"
@@ -1800,7 +1943,8 @@ class centralWidget(QWidget):
             logging.info("setup")
             self.imageProcessor.setup(processData, self.imageLoader.width,
                                       self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
+                                      self.processWidget.prmStruct, self.processWidget.areaIsSelected, self.processWidget.selectedAreas,
+                                      self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
             self.imageProcessor.run()
 
     def exportBMP(self):
@@ -1922,6 +2066,22 @@ class centralWidget(QWidget):
 
     def sensorCooling(self, isChecked):
         dll.SetBool(self.Handle, "SensorCooling", isChecked)
+
+    def selectArea(self, checked):
+        if checked:
+            try:
+                if self.modeTab.currentIndex() == 0:
+                    img = self.imageAcquirer.img
+                else:
+                    img = self.imageLoader.img
+                self.areaDialog = AreaSelectDialog(img)
+                if self.areaDialog.exec_():
+                    self.processWidget.selectedAreas = self.areaDialog.applyAreas()
+                else:
+                    self.processWidget.areaSelectButton.setChecked(False)
+            except AttributeError:
+                self.processWidget.areaSelectButton.setChecked(False)
+                logging.error("No Image to draw for select areas")
 
 
 class mainWindow(QMainWindow):
