@@ -10,6 +10,8 @@ import cv2
 import logging
 import socket
 import mmap
+import gaussfit as gf
+import matplotlib.pyplot as plt
 from glob import glob
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import QDir, Qt, QSettings, QTimer
@@ -287,6 +289,7 @@ class ImageProcessor(QtCore.QThread):
             ImgArry = (ct.c_ushort * (self.width * self.height))()
             point = (ct.c_float*2)()
             pointlst = []
+            prmsList = []
             datfile, start, end, imgSize = self.datfiles
             num = end - start
             self.pBar.setMaximum(num-1)
@@ -307,6 +310,17 @@ class ImageProcessor(QtCore.QThread):
                         cAreaImg = imgBuffer.ctypes.data_as(ct.POINTER(ct.c_ushort))
                         dll.processImage(point, height, width, cAreaImg, self.prms)
                         areaList.append([LT[0]+point[0], LT[1]+point[1]])
+                        gaussfit = gf.GaussFit(areaImg)
+                        try:
+                            fitted, prms, cov = gaussfit.fit()
+                        except RuntimeError:
+                            print("fitting failed at " + str(i))
+                        else:
+                            prmsList.append(prms)
+                            fig, axes = plt.subplots(2)
+                            axes[0].imshow(areaImg)
+                            axes[1].imshow(fitted)
+                            fig.savefig(self.dir + r"\fitted_"+str(i)+".png")
                     self.pBar.setValue(i)
                     pointlst.append(areaList)
                 else:
@@ -318,6 +332,7 @@ class ImageProcessor(QtCore.QThread):
             DF.columns = columnNames
             DF.to_csv(self.dir + r"\COG.csv")
             logging.info("analysis finished")
+            print(prmsList)
 
 
 # class definition for UI
@@ -674,6 +689,8 @@ class imageLoader(QWidget):
         self.imgMinBox.setReadOnly(True)
         self.imgMinBox.setSizePolicy(QSizePolicy(5, 0))
 
+        self.gaussFitButton = QPushButton("Gauss Fit")
+
         self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
@@ -697,7 +714,7 @@ class imageLoader(QWidget):
         bottomLayout.addWidget(self.progressBar)
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, bottomLayout])
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout])
 
     def initVal(self):
         self.dirname = None
@@ -1485,6 +1502,66 @@ class AreaSelectDialog(QDialog):
         self.drawRectangles()
 
 
+class GaussFitDialog(QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.rawImageWidet = MyImageWidget(self)
+        self.fittedImageWidget = MyImageWidget(self)
+        self.prmsTable = QTableWidget(1,6,self)
+        self.prmsTable.setHorizontalHeaderLabels(["Amp.", "Cx", "Cy", "Sx", "Sy", "Base"])
+        self.leftButton = QToolButton()
+        self.leftButton.setArrowType(Qt.LeftArrow)
+        self.rightButton = QToolButton()
+        self.rightButton.setArrowType(Qt.RightArrow)
+
+
+        imgLayout = QHBoxLayout()
+        imgLayout.addWidget(self.leftButton)
+        imgLayout.addWidget(self.rawImageWidet)
+        imgLayout.addWidget(self.fittedImageWidget)
+        imgLayout.addWidget(self.rightButton)
+
+        mainLayout = QVBoxLayout(self)
+        mainLayout.addLayout(imgLayout)
+        mainLayout.addWidget(self.prmsTable)
+
+        self.results = []
+
+    def setResults(self):
+        num = len(self.results)
+        for result, i in zip(self.results, range(num)):
+            for val, j in zip(result[2], range(len(result[2]))):
+                item = QTableWidgetItem(f"{val:.5g}")
+                self.prmsTable.setItem(i, j, item)
+            self.prmsTable.insertRow(i+1)
+
+    def resizeImage(self, img):
+        img_height, img_width = img.shape
+        scale_w = float(400) / float(img_width)
+        scale_h = float(400) / float(img_height)
+        scale = min([scale_w, scale_h])
+
+        if scale == 0:
+            scale = 1
+
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        img = cv2.convertScaleAbs(img, alpha=1/16)
+        img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2RGB)
+        height, width, bpc = img.shape
+        bpl = bpc * width
+        image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
+        return image
+
+    def showResults(self, num):
+        result = self.results[num]
+        rawImg = self.resizeImage(result[0])
+        fittedImg = self.resizeImage(result[1])
+        self.rawImageWidet.setImage(rawImg)
+        self.fittedImageWidget.setImage(fittedImg)
+
+
 class centralWidget(QWidget):
 
     def __init__(self, parent=None):
@@ -1509,6 +1586,7 @@ class centralWidget(QWidget):
         self.modeTab.addTab(self.imageLoader, 'Image Load')
 
         self.specialDialog = SpecialMeasurementDialog()
+        self.gaussFitDialog = GaussFitDialog()
 
         self.initSignal()
         self.initUI()
@@ -1522,6 +1600,7 @@ class centralWidget(QWidget):
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
+        self.imageLoader.gaussFitButton.clicked.connect(self.gaussFitData)
 
         self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
 
@@ -1942,6 +2021,36 @@ class centralWidget(QWidget):
         strings = ''.join(map(str, self.outDIO))
         out = int(strings, 2)
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
+
+    def gaussFitData(self):
+        width, height, stride = self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride
+        ImgArry = (ct.c_ushort * (width * height))()
+        prmsList = []
+        datfile, imgSize = self.imageLoader.dirname+"/spool.dat", self.imageLoader.imgSize
+        mm = self.imageLoader.mm
+        mm.seek(imgSize*0)
+        rawdata = mm.read(imgSize)
+        buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+        ret = dll.convertBuffer(buffer, ImgArry, width, height, stride)
+        imgNpArray = np.array(ImgArry).reshape(width, height)
+        areaResults = []
+        for area in self.imageLoader.selectedAreas:
+            LT, RB = area
+            areaWidth = RB[0] - LT[0]
+            areaHeight = RB[1] - LT[1]
+            areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+            gaussfit = gf.GaussFit(areaImg)
+            try:
+                fitted, prms, cov = gaussfit.fit()
+            except RuntimeError:
+                logging.warning("fitting failed at " + str(i))
+            else:
+                areaResults.append([areaImg, fitted, prms, cov])
+        self.gaussFitDialog.results = areaResults
+        self.gaussFitDialog.setResults()
+        self.gaussFitDialog.showResults(0)
+        if self.gaussFitDialog.exec_():
+            pass
 
     def analyzeDatas(self):
         self.applyProcessSettings()
