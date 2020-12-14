@@ -2043,7 +2043,7 @@ class centralWidget(QWidget):
             try:
                 fitted, prms, cov = gaussfit.fit()
             except RuntimeError:
-                logging.warning("fitting failed at " + str(i))
+                logging.warning("fitting failed at ")
             else:
                 areaResults.append([areaImg, fitted, prms, cov])
         self.gaussFitDialog.results = areaResults
