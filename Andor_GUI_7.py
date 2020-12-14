@@ -1474,8 +1474,11 @@ class AreaSelectDialog(QDialog):
 
     def mouseReleased(self, point):
         self.end = (point.x(), point.y())
-        if (self.end[0]-self.start[0])*(self.end[1]-self.start[1]):
-            self.rects.append((self.start, self.end))
+        length = max(abs(self.start[0]-self.end[0]), abs(self.start[1]-self.end[1]))
+        if length > 0:
+            LT = (self.start[0]-length, self.start[1]-length)
+            RB = (self.start[0]+length, self.start[1]+length)
+            self.rects.append((LT, RB))
         self.start, self.end = None, None
         self.drawRectangles()
 
@@ -1484,7 +1487,10 @@ class AreaSelectDialog(QDialog):
         for rect in self.rects:
             img = cv2.rectangle(img, rect[0], rect[1], (0,255,0), 3)
         if self.start and self.end:
-            img = cv2.rectangle(img, self.start, self.end, (0,255,0), 3)
+            length = max(abs(self.start[0]-self.end[0]), abs(self.start[1]-self.end[1]))
+            LT = (self.start[0]-length, self.start[1]-length)
+            RB = (self.start[0]+length, self.start[1]+length)
+            img = cv2.rectangle(img, LT, RB, (0,255,0), 3)
         self.setImage(img)
 
     def applyAreas(self):
@@ -1531,6 +1537,8 @@ class GaussFitDialog(QDialog):
 
     def setResults(self):
         num = len(self.results)
+        self.prmsTable.clearContents()
+        self.prmsTable.setRowCount(1)
         for result, i in zip(self.results, range(num)):
             for val, j in zip(result[2], range(len(result[2]))):
                 item = QTableWidgetItem(f"{val:.5g}")
