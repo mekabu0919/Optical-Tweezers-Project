@@ -1151,7 +1151,7 @@ class SLM_Controller(QGroupBox):
 
             img = ((X // pitch + Y // pitch) % 2) * 128
             circle = (X-396)**2 + (Y-300)**2
-            thres = circle > 50**2
+            thres = circle > 250**2
             self.mask = thres*img.astype(np.uint8)
         else:
             self.mask = 0
