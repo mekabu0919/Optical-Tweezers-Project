@@ -1521,6 +1521,8 @@ class GaussFitDialog(QDialog):
         self.leftButton.setArrowType(Qt.LeftArrow)
         self.rightButton = QToolButton()
         self.rightButton.setArrowType(Qt.RightArrow)
+        self.leftButton.clicked.connect(lambda: self.changeCurrent(-1))
+        self.rightButton.clicked.connect(lambda: self.changeCurrent(1))
 
 
         imgLayout = QHBoxLayout()
@@ -1534,6 +1536,7 @@ class GaussFitDialog(QDialog):
         mainLayout.addWidget(self.prmsTable)
 
         self.results = []
+        self.current = 0
 
     def setResults(self):
         num = len(self.results)
@@ -1563,11 +1566,18 @@ class GaussFitDialog(QDialog):
         return image
 
     def showResults(self, num):
+        number = len(self.results)
         result = self.results[num]
         rawImg = self.resizeImage(result[0])
         fittedImg = self.resizeImage(result[1])
         self.rawImageWidet.setImage(rawImg)
         self.fittedImageWidget.setImage(fittedImg)
+        self.leftButton.setEnabled(num > 0)
+        self.rightButton.setEnabled(num < number-1)
+
+    def changeCurrent(self, drct):
+        self.current += drct
+        self.showResults(self.current)
 
 
 class centralWidget(QWidget):
