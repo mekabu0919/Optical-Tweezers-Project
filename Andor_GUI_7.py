@@ -1095,7 +1095,7 @@ class SLM_Controller(QGroupBox):
         X, Y = np.meshgrid(x, y)
         focusCorrection = (X**2 + Y**2)*self.focus*1e-2
         tiltCorrection = self.tiltX*X + self.tiltY*Y
-        self.base = (self.correction + tiltCorrection + focusCorrection.astype(np.uint8) + self.mask).astype(np.uint8)
+        self.base = (self.correction + tiltCorrection + focusCorrection + self.mask).astype(np.uint8)
 
     def init_img(self):
         img = self.base.astype(np.float) * self.alpha / 255
