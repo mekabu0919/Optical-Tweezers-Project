@@ -245,13 +245,13 @@ class ImageProcessor(QtCore.QThread):
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, datfiles, width, height, stride, prms, areaIsSelected, selectedAreas, dir, pBar, old, mm=None):
+    def setup(self, datfiles, width, height, stride, prms, gfchecked, selectedAreas, dir, pBar, old, mm=None):
         self.datfiles = datfiles
         self.width = width
         self.height = height
         self.stride = stride
         self.prms = prms
-        self.areaIsSelected = areaIsSelected
+        self.gfchecked = gfchecked
         self.selectedAreas = selectedAreas
         self.dir = dir
         self.pBar = pBar
@@ -298,41 +298,41 @@ class ImageProcessor(QtCore.QThread):
                 rawdata = self.mm.read(imgSize)
                 buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
                 ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
-                if self.areaIsSelected:
+                if self.gfchecked:
                     imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
-                    areaList = []
-                    for area in self.selectedAreas:
+                    for area, j in zip(self.selectedAreas, range(len(self.selectedAreas))):
+                        prmList = []
                         LT, RB = area
                         width = RB[0] - LT[0]
                         height = RB[1] - LT[1]
                         areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
-                        imgBuffer = areaImg.copy()
-                        cAreaImg = imgBuffer.ctypes.data_as(ct.POINTER(ct.c_ushort))
-                        dll.processImage(point, height, width, cAreaImg, self.prms)
-                        areaList.append([LT[0]+point[0], LT[1]+point[1]])
                         gaussfit = gf.GaussFit(areaImg)
                         try:
                             fitted, prms, cov = gaussfit.fit()
                         except RuntimeError:
-                            print("fitting failed at " + str(i))
+                            logging.warning("fitting failed at " + str(i))
                         else:
-                            prmsList.append(prms)
-                            fig, axes = plt.subplots(2)
-                            axes[0].imshow(areaImg)
-                            axes[1].imshow(fitted)
-                            fig.savefig(self.dir + r"\fitted_"+str(i)+".png")
+                            prmList.append(j)
+                            prmList += list(prms)
+                            err = np.sqrt(np.diag(cov))
+                            prmList += list(err)
+                            prmsList.append(prmList)
                     self.pBar.setValue(i)
-                    pointlst.append(areaList)
                 else:
                     dll.processImage(point, self.height, self.width, ImgArry, self.prms)
                     pointlst.append([point[0], point[1]])
                     self.pBar.setValue(i)
-            DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
-            columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
-            DF.columns = columnNames
-            DF.to_csv(self.dir + r"\COG.csv")
+            if pointlst:
+                DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
+                columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
+                DF.columns = columnNames
+                DF.to_csv(self.dir + r"\COG.csv", index=False)
+            if prmsList:
+                DF = pd.DataFrame(np.array(prmsList))
+                columnNames = ["areaNumber","Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
+                DF.columns = columnNames
+                DF.to_csv(self.dir + r"\FittingResults.csv", index=False)
             logging.info("analysis finished")
-            print(prmsList)
 
 
 # class definition for UI
@@ -690,6 +690,7 @@ class imageLoader(QWidget):
         self.imgMinBox.setSizePolicy(QSizePolicy(5, 0))
 
         self.gaussFitButton = QPushButton("Gauss Fit")
+        self.gaussFitButton.setCheckable(True)
 
         self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
@@ -1523,7 +1524,10 @@ class GaussFitDialog(QDialog):
         self.rightButton.setArrowType(Qt.RightArrow)
         self.leftButton.clicked.connect(lambda: self.changeCurrent(-1))
         self.rightButton.clicked.connect(lambda: self.changeCurrent(1))
-
+        self.acceptButton = QPushButton("Proceed")
+        self.rejectButton = QPushButton("Cancel")
+        self.acceptButton.clicked.connect(self.accept)
+        self.rejectButton.clicked.connect(self.reject)
 
         imgLayout = QHBoxLayout()
         imgLayout.addWidget(self.leftButton)
@@ -1531,9 +1535,14 @@ class GaussFitDialog(QDialog):
         imgLayout.addWidget(self.fittedImageWidget)
         imgLayout.addWidget(self.rightButton)
 
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.acceptButton)
+        bottomLayout.addWidget(self.rejectButton)
+
         mainLayout = QVBoxLayout(self)
         mainLayout.addLayout(imgLayout)
         mainLayout.addWidget(self.prmsTable)
+        mainLayout.addLayout(bottomLayout)
 
         self.results = []
         self.current = 0
@@ -2061,14 +2070,18 @@ class centralWidget(QWidget):
             try:
                 fitted, prms, cov = gaussfit.fit()
             except RuntimeError:
-                logging.warning("fitting failed at ")
+                logging.warning("fitting failed")
             else:
                 areaResults.append([areaImg, fitted, prms, cov])
-        self.gaussFitDialog.results = areaResults
-        self.gaussFitDialog.setResults()
-        self.gaussFitDialog.showResults(0)
-        if self.gaussFitDialog.exec_():
-            pass
+        if areaResults:
+            self.gaussFitDialog.results = areaResults
+            self.gaussFitDialog.setResults()
+            self.gaussFitDialog.showResults(0)
+            if not self.gaussFitDialog.exec_():
+                self.imageLoader.gaussFitButton.setChecked(False)
+        else:
+            self.imageLoader.gaussFitButton.setChecked(False)
+            logging.warning("No results to show")
 
     def analyzeDatas(self):
         self.applyProcessSettings()
@@ -2091,7 +2104,7 @@ class centralWidget(QWidget):
             logging.info("setup")
             self.imageProcessor.setup(processData, self.imageLoader.width,
                                       self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.processWidget.areaIsSelected, self.processWidget.selectedAreas,
+                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
                                       self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
             self.imageProcessor.run()
 
