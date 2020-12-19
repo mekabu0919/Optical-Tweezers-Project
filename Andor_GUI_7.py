@@ -310,7 +310,10 @@ class ImageProcessor(QtCore.QThread):
                         try:
                             fitted, prms, cov = gaussfit.fit()
                         except RuntimeError:
-                            logging.warning("fitting failed at " + str(i))
+                            logging.warning("fitting failed at area " + str(j) in shot str(i))
+                            prmList.append(j)
+                            prmList += [None]*12
+                            prmsList.append(prmList)
                         else:
                             prmList.append(j)
                             prmList += list(prms)
@@ -1517,7 +1520,7 @@ class GaussFitDialog(QDialog):
         self.rawImageWidet = MyImageWidget(self)
         self.fittedImageWidget = MyImageWidget(self)
         self.prmsTable = QTableWidget(1,6,self)
-        self.prmsTable.setHorizontalHeaderLabels(["Amp.", "Cx", "Cy", "Sx", "Sy", "Base"])
+        self.prmsTable.setHorizontalHeaderLabels(["Area", "Amp.", "Cx", "Cy", "Sx", "Sy", "Background"])
         self.leftButton = QToolButton()
         self.leftButton.setArrowType(Qt.LeftArrow)
         self.rightButton = QToolButton()
@@ -1575,6 +1578,7 @@ class GaussFitDialog(QDialog):
         return image
 
     def showResults(self, num):
+        self.current = num
         number = len(self.results)
         result = self.results[num]
         rawImg = self.resizeImage(result[0])
@@ -1627,7 +1631,7 @@ class centralWidget(QWidget):
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
-        self.imageLoader.gaussFitButton.clicked.connect(self.gaussFitData)
+        self.imageLoader.gaussFitButton.toggled.connect(self.gaussFitData)
 
         self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
 
@@ -2049,39 +2053,41 @@ class centralWidget(QWidget):
         out = int(strings, 2)
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
 
-    def gaussFitData(self):
-        width, height, stride = self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride
-        ImgArry = (ct.c_ushort * (width * height))()
-        prmsList = []
-        datfile, imgSize = self.imageLoader.dirname+"/spool.dat", self.imageLoader.imgSize
-        mm = self.imageLoader.mm
-        mm.seek(imgSize*0)
-        rawdata = mm.read(imgSize)
-        buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
-        ret = dll.convertBuffer(buffer, ImgArry, width, height, stride)
-        imgNpArray = np.array(ImgArry).reshape(width, height)
-        areaResults = []
-        for area in self.imageLoader.selectedAreas:
-            LT, RB = area
-            areaWidth = RB[0] - LT[0]
-            areaHeight = RB[1] - LT[1]
-            areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
-            gaussfit = gf.GaussFit(areaImg)
-            try:
-                fitted, prms, cov = gaussfit.fit()
-            except RuntimeError:
-                logging.warning("fitting failed")
+    def gaussFitData(self, checked):
+        if checked:
+            width, height, stride = self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride
+            ImgArry = (ct.c_ushort * (width * height))()
+            prmsList = []
+            datfile, imgSize = self.imageLoader.dirname+"/spool.dat", self.imageLoader.imgSize
+            mm = self.imageLoader.mm
+            mm.seek(imgSize*0)
+            rawdata = mm.read(imgSize)
+            buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+            ret = dll.convertBuffer(buffer, ImgArry, width, height, stride)
+            imgNpArray = np.array(ImgArry).reshape(width, height)
+            areaResults = []
+            for area, i  in zip(self.imageLoader.selectedAreas, range(len(self.imageLoader.selectedAreas))):
+                LT, RB = area
+                areaWidth = RB[0] - LT[0]
+                areaHeight = RB[1] - LT[1]
+                areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                gaussfit = gf.GaussFit(areaImg)
+                try:
+                    fitted, prms, cov = gaussfit.fit()
+                except RuntimeError:
+                    logging.warning("fitting failed at area "+str(i))
+                else:
+                    prms = np.insert(prms, 0, i)
+                    areaResults.append([areaImg, fitted, prms, cov])
+            if areaResults:
+                self.gaussFitDialog.results = areaResults
+                self.gaussFitDialog.setResults()
+                self.gaussFitDialog.showResults(0)
+                if not self.gaussFitDialog.exec_():
+                    self.imageLoader.gaussFitButton.setChecked(False)
             else:
-                areaResults.append([areaImg, fitted, prms, cov])
-        if areaResults:
-            self.gaussFitDialog.results = areaResults
-            self.gaussFitDialog.setResults()
-            self.gaussFitDialog.showResults(0)
-            if not self.gaussFitDialog.exec_():
                 self.imageLoader.gaussFitButton.setChecked(False)
-        else:
-            self.imageLoader.gaussFitButton.setChecked(False)
-            logging.warning("No results to show")
+                logging.warning("No results to show")
 
     def analyzeDatas(self):
         self.applyProcessSettings()
