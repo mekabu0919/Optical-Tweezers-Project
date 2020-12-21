@@ -294,6 +294,7 @@ class ImageProcessor(QtCore.QThread):
             num = end - start
             self.pBar.setMaximum(num-1)
             self.mm.seek(imgSize*start)
+            logText = ""
             for i in range(num):
                 rawdata = self.mm.read(imgSize)
                 buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
@@ -310,11 +311,13 @@ class ImageProcessor(QtCore.QThread):
                         try:
                             fitted, prms, cov = gaussfit.fit()
                         except RuntimeError:
-                            logging.warning("fitting failed at area " + str(j) in shot str(i))
+                            prmList.append(i)
                             prmList.append(j)
                             prmList += [None]*12
                             prmsList.append(prmList)
+                            logText += f"Fitting failed at area {j} in shot {i}\n"
                         else:
+                            prmList.append(i)
                             prmList.append(j)
                             prmList += list(prms)
                             err = np.sqrt(np.diag(cov))
@@ -332,9 +335,11 @@ class ImageProcessor(QtCore.QThread):
                 DF.to_csv(self.dir + r"\COG.csv", index=False)
             if prmsList:
                 DF = pd.DataFrame(np.array(prmsList))
-                columnNames = ["areaNumber","Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
+                columnNames = ["shotNumber", "areaNumber", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
                 DF.columns = columnNames
                 DF.to_csv(self.dir + r"\FittingResults.csv", index=False)
+                with open(self.dir + r"\FittingLog.txt", "w") as f:
+                    f.write(logText)
             logging.info("analysis finished")
 
 
@@ -470,10 +475,30 @@ class contWidget(QWidget):
         MainLayout.setStretch(1, 1)
 
 
+class CommentDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.textEdit = QTextEdit(self)
+        self.applyButton = QPushButton("Apply")
+        self.cancelButton = QPushButton("Cancel")
+
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.applyButton)
+        bottomLayout.addWidget(self.cancelButton)
+        mainLayout = QVBoxLayout(self)
+        mainLayout.addWidget(self.textEdit)
+        mainLayout.addLayout(bottomLayout)
+
+        self.applyButton.clicked.connect(self.accept)
+        self.cancelButton.clicked.connect(self.reject)
+
+
 class fixedWidget(QWidget):
 
     def __init__(self, parent=None):
         super(QWidget, self).__init__(parent)
+
+        self.comment = ""
 
         self.initUI()
 
@@ -497,6 +522,11 @@ class fixedWidget(QWidget):
         self.currentRepeatBox = QLineEdit(self)
         self.currentRepeatBox.setReadOnly(True)
         self.currentRepeatBox.setSizePolicy(QSizePolicy(5, 0))
+        self.commentButton = QPushButton("Comment")
+        self.commentButton.setCheckable(True)
+        self.commentButton.toggled.connect(self.commentEdit)
+        self.commentDialog = CommentDialog(self)
+        self.commentDialog.setWindowTitle("Comment")
 
         self.initLayout()
 
@@ -513,6 +543,7 @@ class fixedWidget(QWidget):
         leftGridLayout.addLayout(dirLayout, 2, 1)
         leftGridLayout.addWidget(QLabel("Current Frame:"), 3, 0)
         leftGridLayout.addWidget(self.countBox, 3, 1)
+        leftGridLayout.addWidget(self.commentButton, 4, 0)
         leftGridLayout.setColumnStretch(0, 1)
         leftGridLayout.setColumnStretch(1, 1)
 
@@ -536,6 +567,13 @@ class fixedWidget(QWidget):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
         self.dirname = QDir.toNativeSeparators(self.dirname)
         self.dirBox.setText(self.dirname)
+
+    def commentEdit(self, checked):
+        if checked:
+            if self.commentDialog.exec_():
+                self.comment = self.commentDialog.textEdit.document()
+            else:
+                self.commentButton.setChecked(False)
 
 
 class AOISettingBox(QGroupBox):
@@ -1832,6 +1870,10 @@ class centralWidget(QWidget):
                 self.imageAcquirer.start()
 
             else:
+                if self.acquisitionWidget.fixedWidget.commentButton.isChecked():
+                    mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                    with open(mainDir, "w") as f:
+                        f.write(self.acquisitionWidget.fixedWidget.comment)
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
                     if self.specialPrms["mode"] == 1:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
