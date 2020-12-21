@@ -310,7 +310,7 @@ class ImageProcessor(QtCore.QThread):
                         try:
                             fitted, prms, cov = gaussfit.fit()
                         except RuntimeError:
-                            logging.warning("fitting failed at area " + str(j) in shot str(i))
+                            logging.warning("fitting failed at area " + str(j) + " in shot " + str(i))
                             prmList.append(j)
                             prmList += [None]*12
                             prmsList.append(prmList)
