@@ -1872,7 +1872,7 @@ class centralWidget(QWidget):
             else:
                 if self.acquisitionWidget.fixedWidget.commentButton.isChecked():
                     mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                    with open(mainDir, "w") as f:
+                    with open(mainDir+"log.txt", "w") as f:
                         f.write(self.acquisitionWidget.fixedWidget.comment)
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
                     if self.specialPrms["mode"] == 1:
