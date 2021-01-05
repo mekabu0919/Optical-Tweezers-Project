@@ -306,7 +306,6 @@ class ImageProcessor(QtCore.QThread):
                         LT, RB = area
                         width = RB[0] - LT[0]
                         height = RB[1] - LT[1]
-                        areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
                         gaussfit = gf.GaussFit(areaImg)
                         try:
                             fitted, prms, cov = gaussfit.fit()
@@ -325,9 +324,27 @@ class ImageProcessor(QtCore.QThread):
                             prmsList.append(prmList)
                     self.pBar.setValue(i)
                 else:
-                    dll.processImage(point, self.height, self.width, ImgArry, self.prms)
-                    pointlst.append([point[0], point[1]])
-                    self.pBar.setValue(i)
+                    if self.selectedAreas:
+                        imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
+                        for area, j in zip(self.selectedAreas, range(len(self.selectedAreas))):
+                            prmList = []
+                            LT, RB = area
+                            width = RB[0] - LT[0]
+                            height = RB[1] - LT[1]
+                            areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                            areaImg_np = np.copy(areaImg)
+                            areaImgC = areaImg_np.ctypes.data_as(ct.POINTER(ct.c_ushort * (width*height)))
+                            areaImgC_pt = ct.cast(areaImgC, ct.POINTER(ct.c_ushort))
+                            point = (ct.c_float*2)()
+                            dll.processImage(point, height, width, areaImgC_pt, self.prms)
+                            pointlst.append([point[0]+LT[0], point[1]+LT[1]])
+                        self.pBar.setValue(i)
+
+                    else:
+                        dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                        pointlst.append([point[0], point[1]])
+                        self.pBar.setValue(i)
+
             if pointlst:
                 DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
                 columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
@@ -1880,12 +1897,17 @@ class centralWidget(QWidget):
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
                         positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        waitTime = time.time()
+                        while True:
+                            now = time.time()
+                            if (now - 600) > waitTime:
+                                break
                         for pos in positions:
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
-                                if (now - 3) > waitTime:
+                                if (now - 60) > waitTime:
                                     break
                             self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
