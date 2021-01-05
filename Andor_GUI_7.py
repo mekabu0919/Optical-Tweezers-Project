@@ -753,6 +753,7 @@ class imageLoader(QWidget):
         self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
+        self.anlzCheck = QCheckBox('Multiple Directories', self)
 
         self.progressBar = QProgressBar(self)
         self.progressBar.setMaximum(100)
@@ -770,6 +771,7 @@ class imageLoader(QWidget):
 
         bottomLayout = QHBoxLayout()
         bottomLayout.addWidget(self.anlzButton)
+        bottomLayout.addWidget(self.anlzCheck)
         bottomLayout.addWidget(self.progressBar)
 
         vbox0 = QVBoxLayout(self)
