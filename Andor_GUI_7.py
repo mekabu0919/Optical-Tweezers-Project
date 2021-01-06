@@ -358,6 +358,7 @@ class ImageProcessor(QtCore.QThread):
                 with open(self.dir + r"\FittingLog.txt", "w") as f:
                     f.write(logText)
             logging.info("analysis finished")
+        self.stopped = True
 
 
 # class definition for UI
@@ -754,6 +755,7 @@ class imageLoader(QWidget):
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
         self.anlzCheck = QCheckBox('Multiple Directories', self)
+        self.anlzFilter = QLineEdit(self)
 
         self.progressBar = QProgressBar(self)
         self.progressBar.setMaximum(100)
@@ -772,10 +774,10 @@ class imageLoader(QWidget):
         bottomLayout = QHBoxLayout()
         bottomLayout.addWidget(self.anlzButton)
         bottomLayout.addWidget(self.anlzCheck)
-        bottomLayout.addWidget(self.progressBar)
+        bottomLayout.addWidget(self.anlzFilter)
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout])
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout, self.progressBar])
 
     def initVal(self):
         self.dirname = None
@@ -2171,14 +2173,30 @@ class centralWidget(QWidget):
                                       self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old)
             self.imageProcessor.run()
         else:
-            datFile = self.imageLoader.dirname +"/spool.dat"
-            processData = (datFile, start, end, self.imageLoader.imgSize)
-            logging.info("setup")
-            self.imageProcessor.setup(processData, self.imageLoader.width,
-                                      self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
-                                      self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
-            self.imageProcessor.run()
+            if self.imageLoader.anlzCheck.isChecked():
+                filterText = self.imageLoader.anlzFilter.text()
+                filterDirs = glob(filterText)
+                for dir in filterDirs:
+                    datFile = dir +"/spool.dat"
+                    processData = (datFile, start, end, self.imageLoader.imgSize)
+                    logging.info("setup")
+                    self.imageProcessor.setup(processData, self.imageLoader.width,
+                                              self.imageLoader.height, self.imageLoader.stride,
+                                              self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                              dir, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
+                    self.imageProcessor.run()
+                    while not self.imageProcessor.stopped:
+                        pass
+                        # print(self.imageProcessor.stopped)
+            else:
+                datFile = self.imageLoader.dirname +"/spool.dat"
+                processData = (datFile, start, end, self.imageLoader.imgSize)
+                logging.info("setup")
+                self.imageProcessor.setup(processData, self.imageLoader.width,
+                                          self.imageLoader.height, self.imageLoader.stride,
+                                          self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                          self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
+                self.imageProcessor.run()
 
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
