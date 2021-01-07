@@ -306,6 +306,7 @@ class ImageProcessor(QtCore.QThread):
                         LT, RB = area
                         width = RB[0] - LT[0]
                         height = RB[1] - LT[1]
+                        areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
                         gaussfit = gf.GaussFit(areaImg)
                         try:
                             fitted, prms, cov = gaussfit.fit()
@@ -2187,7 +2188,7 @@ class centralWidget(QWidget):
                     self.imageProcessor.run()
                     while not self.imageProcessor.stopped:
                         pass
-                        # print(self.imageProcessor.stopped)
+
             else:
                 datFile = self.imageLoader.dirname +"/spool.dat"
                 processData = (datFile, start, end, self.imageLoader.imgSize)
