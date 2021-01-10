@@ -1905,14 +1905,14 @@ class centralWidget(QWidget):
                         waitTime = time.time()
                         while True:
                             now = time.time()
-                            if (now - 600) > waitTime:
+                            if (now - 3) > waitTime:
                                 break
                         for pos in positions:
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
-                                if (now - 60) > waitTime:
+                                if (now - 3) > waitTime:
                                     break
                             self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
@@ -2179,15 +2179,17 @@ class centralWidget(QWidget):
                 filterDirs = glob(filterText)
                 for dir in filterDirs:
                     datFile = dir +"/spool.dat"
-                    processData = (datFile, start, end, self.imageLoader.imgSize)
-                    logging.info("setup")
-                    self.imageProcessor.setup(processData, self.imageLoader.width,
-                                              self.imageLoader.height, self.imageLoader.stride,
-                                              self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
-                                              dir, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
-                    self.imageProcessor.run()
-                    while not self.imageProcessor.stopped:
-                        pass
+                    with open(datFile, mode="r+b") as f:
+                        with mmap.mmap(f.fileno(), 0) as mm:
+                            processData = (datFile, start, end, self.imageLoader.imgSize)
+                            logging.info("setup")
+                            self.imageProcessor.setup(processData, self.imageLoader.width,
+                                                      self.imageLoader.height, self.imageLoader.stride,
+                                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                                      dir, self.imageLoader.progressBar, self.imageLoader.old, mm)
+                            self.imageProcessor.run()
+                            while not self.imageProcessor.stopped:
+                                pass
 
             else:
                 datFile = self.imageLoader.dirname +"/spool.dat"
