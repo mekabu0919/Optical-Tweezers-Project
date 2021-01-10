@@ -116,7 +116,6 @@ class ImageAcquirer(QtCore.QThread):
         self.args = args
         self.areaIsSelected = False
         self.selectedAreas = []
-        self.stop
         if center is None:
             self.center = (ct.c_float*2)(0.0, 0.0)
         else:
@@ -140,7 +139,7 @@ class ImageAcquirer(QtCore.QThread):
             elif self.mode==2:
                 self.feedbackedAcquisition()
             else:
-                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.args["piezoID"])
+                dll.startFixedAcquisitionFilePiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], ct.byref(self.stopDll), self.args["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -1908,6 +1907,8 @@ class centralWidget(QWidget):
                             if (now - 3) > waitTime:
                                 break
                         for pos in positions:
+                            if not self.acquisitionWidget.runButton.isChecked():
+                                break
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
                             while True:
