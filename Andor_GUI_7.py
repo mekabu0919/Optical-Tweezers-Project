@@ -312,12 +312,14 @@ class ImageProcessor(QtCore.QThread):
                         except RuntimeError:
                             prmList.append(i)
                             prmList.append(j)
-                            prmList += [None]*12
+                            prmList += [None]*14
                             prmsList.append(prmList)
                             logText += f"Fitting failed at area {j} in shot {i}\n"
                         else:
                             prmList.append(i)
                             prmList.append(j)
+                            prmList.append(LT[0])
+                            prmList.append(LT[1])
                             prmList += list(prms)
                             err = np.sqrt(np.diag(cov))
                             prmList += list(err)
@@ -344,7 +346,6 @@ class ImageProcessor(QtCore.QThread):
                         dll.processImage(point, self.height, self.width, ImgArry, self.prms)
                         pointlst.append([point[0], point[1]])
                         self.pBar.setValue(i)
-
             if pointlst:
                 DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
                 columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
@@ -352,7 +353,7 @@ class ImageProcessor(QtCore.QThread):
                 DF.to_csv(self.dir + r"\COG.csv", index=False)
             if prmsList:
                 DF = pd.DataFrame(np.array(prmsList))
-                columnNames = ["shotNumber", "areaNumber", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
+                columnNames = ["shotNumber", "areaNumber", "Left", "Top", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
                 DF.columns = columnNames
                 DF.to_csv(self.dir + r"\FittingResults.csv", index=False)
                 with open(self.dir + r"\FittingLog.txt", "w") as f:
@@ -431,6 +432,7 @@ class PosLabeledImageWidget(QWidget):
 class SLMWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(Qt.WindowStaysOnTopHint)
         self.canvas = MyImageWidget(self)
         self.img = None
 
@@ -1452,7 +1454,8 @@ class SpecialMeasurementDialog(QDialog):
             self.step = self.tiltStepBox.value()
             self.num = self.tiltNumBox.value()
             self.tiltXY = self.tiltXYBox.currentIndex()
-
+        else:
+            self.mode=0
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
         return {"mode": self.mode, "start": self.start, "end": self.end,\
@@ -1563,6 +1566,7 @@ class AreaSelectDialog(QDialog):
             RBx, RBy = max(rect[0][0], rect[1][0]), max(rect[0][1], rect[1][1])
             LT = (int(LTx*self.imgWidth/self.width), int(LTy*self.imgHeight/self.height))
             RB = (int(RBx*self.imgWidth/self.width), int(RBy*self.imgHeight/self.height))
+            RB = (RB[0], LT[1]+RB[0]-LT[0])
             ret.append((LT, RB))
         return ret
 
@@ -1904,7 +1908,7 @@ class centralWidget(QWidget):
                         waitTime = time.time()
                         while True:
                             now = time.time()
-                            if (now - 3) > waitTime:
+                            if (now - 300) > waitTime:
                                 break
                         for pos in positions:
                             if not self.acquisitionWidget.runButton.isChecked():
@@ -1913,7 +1917,7 @@ class centralWidget(QWidget):
                             waitTime = time.time()
                             while True:
                                 now = time.time()
-                                if (now - 3) > waitTime:
+                                if (now - 60) > waitTime:
                                     break
                             self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
