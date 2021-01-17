@@ -429,12 +429,20 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget.setImage(image)
 
 
-class SLMWindow(QDialog):
+class SLMWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint)
         self.canvas = MyImageWidget(self)
+        self.canvas.setMinimumSize(792,600)
+
         self.img = None
+
+        desktop = app.desktop()
+        left = desktop.availableGeometry(1).left()
+        top = desktop.availableGeometry(1).top()
+        self.move(left, top)
+
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint)
 
     def update_SLM(self):
         img = cv2.cvtColor(self.img, cv2.COLOR_GRAY2RGB)
@@ -1138,17 +1146,14 @@ class SLM_Controller(QGroupBox):
 
     def switch_SLM(self, checked):
         if checked:
-            desktop = app.desktop()
-            left = desktop.availableGeometry(1).left()
-            top = desktop.availableGeometry(1).top()
             self.focus = self.focusBox.value()
-            self.w.move(left, top)
             self.w.showFullScreen()
             self.make_base()
             self.init_img()
             self.w.update_SLM()
+            logging.debug((self.w.geometry()))
         else:
-            self.w.reject()
+            self.w.hide()
 
     def wavelengthChanged(self, index):
         self.correction = cv2.imread(self.correctImg[index], 0)
@@ -2367,6 +2372,7 @@ class mainWindow(QMainWindow):
         fileMenu.addAction(exitAct)
 
         self.setWindowTitle('Andor_CMOS')
+        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint | Qt.WindowMaximizeButtonHint)
 
         self.show()
 
