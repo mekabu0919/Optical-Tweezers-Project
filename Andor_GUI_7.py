@@ -468,10 +468,10 @@ class contWidget(QWidget):
 
         self.markerPositionBoxX = QSpinBox(self)
         self.markerPositionBoxY = QSpinBox(self)
-        self.markerPositionBoxX.setMaximum(400)
-        self.markerPositionBoxY.setMaximum(400)
-        self.markerPositionBoxX.setMinimum(-400)
-        self.markerPositionBoxY.setMinimum(-400)
+        self.markerPositionBoxX.setMaximum(396)
+        self.markerPositionBoxY.setMaximum(396)
+        self.markerPositionBoxX.setMinimum(-396)
+        self.markerPositionBoxY.setMinimum(-396)
         self.markerFactorBox = QSpinBox(self)
         self.markerFactorBox.setRange(0, 9999)
         self.splitButton = QCheckBox("Split", self)
@@ -1630,8 +1630,8 @@ class GaussFitDialog(QDialog):
 
     def resizeImage(self, img):
         img_height, img_width = img.shape
-        scale_w = float(400) / float(img_width)
-        scale_h = float(400) / float(img_height)
+        scale_w = float(396) / float(img_width)
+        scale_h = float(396) / float(img_height)
         scale = min([scale_w, scale_h])
 
         if scale == 0:
@@ -1767,7 +1767,7 @@ class centralWidget(QWidget):
         self.MarkerY = 0
         self.imgHeight = 600
         self.imgWidth = 600
-        self.markerPos = [400, 300]
+        self.markerPos = [396, 300]
         self.dst = [0,0,0,0]
         self.split = False
         self.Handle = ct.c_int()
