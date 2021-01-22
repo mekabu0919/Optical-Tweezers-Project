@@ -239,6 +239,8 @@ class ImagePlayer(QtCore.QThread):
 
 class ImageProcessor(QtCore.QThread):
 
+    prgrsSignal = QtCore.pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.stopped = False
@@ -279,7 +281,7 @@ class ImageProcessor(QtCore.QThread):
                 pointlst.append([point[0], point[1]])
                 ## z-position detection
 
-                self.pBar.setValue(i)
+                self.prgrsSignal.emit(i)
             DF = pd.DataFrame(np.array(pointlst))
             DF.columns = ['x', 'y']
             DF.to_csv(self.dir + r"\COG.csv")
@@ -324,7 +326,7 @@ class ImageProcessor(QtCore.QThread):
                             err = np.sqrt(np.diag(cov))
                             prmList += list(err)
                             prmsList.append(prmList)
-                    self.pBar.setValue(i)
+                    self.prgrsSignal.emit(i)
                 else:
                     if self.selectedAreas:
                         imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
@@ -340,12 +342,12 @@ class ImageProcessor(QtCore.QThread):
                             point = (ct.c_float*2)()
                             dll.processImage(point, height, width, areaImgC_pt, self.prms)
                             pointlst.append([point[0]+LT[0], point[1]+LT[1]])
-                        self.pBar.setValue(i)
+                        self.prgrsSignal.emit(i)
 
                     else:
                         dll.processImage(point, self.height, self.width, ImgArry, self.prms)
                         pointlst.append([point[0], point[1]])
-                        self.pBar.setValue(i)
+                        self.prgrsSignal.emit(i)
             if pointlst:
                 DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
                 columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
@@ -1694,9 +1696,9 @@ class centralWidget(QWidget):
     def initSignal(self):
         self.imageAcquirer.imgSignal.connect(self.update_frame)
         self.imageAcquirer.posSignal.connect(self.applyCenter)
-        # self.imageAcquirer.finished.connect(self.acquisitionFinished)
-
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
+        self.imageProcessor.prgrsSignal.connect(self.setAnalysisProgress)
+
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
         self.imageLoader.gaussFitButton.toggled.connect(self.gaussFitData)
@@ -2167,6 +2169,9 @@ class centralWidget(QWidget):
             else:
                 self.imageLoader.gaussFitButton.setChecked(False)
                 logging.warning("No results to show")
+
+    def setAnalysisProgress(self, progress):
+        self.imageLoader.progressBar.setValue(progress)
 
     def analyzeDatas(self):
         self.applyProcessSettings()
