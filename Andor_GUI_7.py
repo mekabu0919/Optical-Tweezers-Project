@@ -10,7 +10,7 @@ import cv2
 import logging
 import socket
 import mmap
-import gaussfit as gf
+import MyModules.gaussfit as gf
 import matplotlib.pyplot as plt
 from glob import glob
 from PyQt5.QtWidgets import *
@@ -1416,7 +1416,7 @@ class SpecialMeasurementDialog(QDialog):
         self.tiltXYBox = QComboBox(self)
         self.tiltXYBox.addItems(["X", "Y"])
 
-        self.repeatCheckBox = QRadioButton("Cycle Measurement", self)
+        self.repeatCheckBox = QCheckBox("Cycle Measurement", self)
         self.repeatBox = QSpinBox(self)
         self.repeatBox.setMinimum(1)
 
