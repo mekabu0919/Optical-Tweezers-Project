@@ -116,7 +116,6 @@ class ImageAcquirer(QtCore.QThread):
         self.args = args
         self.areaIsSelected = False
         self.selectedAreas = []
-        self.stop
         if center is None:
             self.center = (ct.c_float*2)(0.0, 0.0)
         else:
@@ -140,7 +139,7 @@ class ImageAcquirer(QtCore.QThread):
             elif self.mode==2:
                 self.feedbackedAcquisition()
             else:
-                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.args["piezoID"])
+                dll.startFixedAcquisitionFilePiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], ct.byref(self.stopDll), self.args["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -240,6 +239,8 @@ class ImagePlayer(QtCore.QThread):
 
 class ImageProcessor(QtCore.QThread):
 
+    prgrsSignal = QtCore.pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.stopped = False
@@ -280,7 +281,7 @@ class ImageProcessor(QtCore.QThread):
                 pointlst.append([point[0], point[1]])
                 ## z-position detection
 
-                self.pBar.setValue(i)
+                self.prgrsSignal.emit(i)
             DF = pd.DataFrame(np.array(pointlst))
             DF.columns = ['x', 'y']
             DF.to_csv(self.dir + r"\COG.csv")
@@ -313,21 +314,40 @@ class ImageProcessor(QtCore.QThread):
                         except RuntimeError:
                             prmList.append(i)
                             prmList.append(j)
-                            prmList += [None]*12
+                            prmList += [None]*14
                             prmsList.append(prmList)
                             logText += f"Fitting failed at area {j} in shot {i}\n"
                         else:
                             prmList.append(i)
                             prmList.append(j)
+                            prmList.append(LT[0])
+                            prmList.append(LT[1])
                             prmList += list(prms)
                             err = np.sqrt(np.diag(cov))
                             prmList += list(err)
                             prmsList.append(prmList)
-                    self.pBar.setValue(i)
+                    self.prgrsSignal.emit(i)
                 else:
-                    dll.processImage(point, self.height, self.width, ImgArry, self.prms)
-                    pointlst.append([point[0], point[1]])
-                    self.pBar.setValue(i)
+                    if self.selectedAreas:
+                        imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
+                        for area, j in zip(self.selectedAreas, range(len(self.selectedAreas))):
+                            prmList = []
+                            LT, RB = area
+                            width = RB[0] - LT[0]
+                            height = RB[1] - LT[1]
+                            areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                            areaImg_np = np.copy(areaImg)
+                            areaImgC = areaImg_np.ctypes.data_as(ct.POINTER(ct.c_ushort * (width*height)))
+                            areaImgC_pt = ct.cast(areaImgC, ct.POINTER(ct.c_ushort))
+                            point = (ct.c_float*2)()
+                            dll.processImage(point, height, width, areaImgC_pt, self.prms)
+                            pointlst.append([point[0]+LT[0], point[1]+LT[1]])
+                        self.prgrsSignal.emit(i)
+
+                    else:
+                        dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                        pointlst.append([point[0], point[1]])
+                        self.prgrsSignal.emit(i)
             if pointlst:
                 DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
                 columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
@@ -335,12 +355,13 @@ class ImageProcessor(QtCore.QThread):
                 DF.to_csv(self.dir + r"\COG.csv", index=False)
             if prmsList:
                 DF = pd.DataFrame(np.array(prmsList))
-                columnNames = ["shotNumber", "areaNumber", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
+                columnNames = ["shotNumber", "areaNumber", "Left", "Top", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
                 DF.columns = columnNames
                 DF.to_csv(self.dir + r"\FittingResults.csv", index=False)
                 with open(self.dir + r"\FittingLog.txt", "w") as f:
                     f.write(logText)
             logging.info("analysis finished")
+        self.stopped = True
 
 
 # class definition for UI
@@ -410,11 +431,20 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget.setImage(image)
 
 
-class SLMWindow(QDialog):
+class SLMWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.canvas = MyImageWidget(self)
+        self.canvas.setMinimumSize(792,600)
+
         self.img = None
+
+        desktop = app.desktop()
+        left = desktop.availableGeometry(1).left()
+        top = desktop.availableGeometry(1).top()
+        self.move(left, top)
+
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint)
 
     def update_SLM(self):
         img = cv2.cvtColor(self.img, cv2.COLOR_GRAY2RGB)
@@ -440,10 +470,10 @@ class contWidget(QWidget):
 
         self.markerPositionBoxX = QSpinBox(self)
         self.markerPositionBoxY = QSpinBox(self)
-        self.markerPositionBoxX.setMaximum(400)
-        self.markerPositionBoxY.setMaximum(400)
-        self.markerPositionBoxX.setMinimum(-400)
-        self.markerPositionBoxY.setMinimum(-400)
+        self.markerPositionBoxX.setMaximum(396)
+        self.markerPositionBoxY.setMaximum(396)
+        self.markerPositionBoxX.setMinimum(-396)
+        self.markerPositionBoxY.setMinimum(-396)
         self.markerFactorBox = QSpinBox(self)
         self.markerFactorBox.setRange(0, 9999)
         self.splitButton = QCheckBox("Split", self)
@@ -736,6 +766,8 @@ class imageLoader(QWidget):
         self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
+        self.anlzCheck = QCheckBox('Multiple Directories', self)
+        self.anlzFilter = QLineEdit(self)
 
         self.progressBar = QProgressBar(self)
         self.progressBar.setMaximum(100)
@@ -753,10 +785,11 @@ class imageLoader(QWidget):
 
         bottomLayout = QHBoxLayout()
         bottomLayout.addWidget(self.anlzButton)
-        bottomLayout.addWidget(self.progressBar)
+        bottomLayout.addWidget(self.anlzCheck)
+        bottomLayout.addWidget(self.anlzFilter)
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout])
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout, self.progressBar])
 
     def initVal(self):
         self.dirname = None
@@ -1115,17 +1148,14 @@ class SLM_Controller(QGroupBox):
 
     def switch_SLM(self, checked):
         if checked:
-            desktop = app.desktop()
-            left = desktop.availableGeometry(1).left()
-            top = desktop.availableGeometry(1).top()
             self.focus = self.focusBox.value()
-            self.w.move(left, top)
             self.w.showFullScreen()
             self.make_base()
             self.init_img()
             self.w.update_SLM()
+            logging.debug((self.w.geometry()))
         else:
-            self.w.reject()
+            self.w.hide()
 
     def wavelengthChanged(self, index):
         self.correction = cv2.imread(self.correctImg[index], 0)
@@ -1431,7 +1461,8 @@ class SpecialMeasurementDialog(QDialog):
             self.step = self.tiltStepBox.value()
             self.num = self.tiltNumBox.value()
             self.tiltXY = self.tiltXYBox.currentIndex()
-
+        else:
+            self.mode=0
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
         return {"mode": self.mode, "start": self.start, "end": self.end,\
@@ -1542,6 +1573,7 @@ class AreaSelectDialog(QDialog):
             RBx, RBy = max(rect[0][0], rect[1][0]), max(rect[0][1], rect[1][1])
             LT = (int(LTx*self.imgWidth/self.width), int(LTy*self.imgHeight/self.height))
             RB = (int(RBx*self.imgWidth/self.width), int(RBy*self.imgHeight/self.height))
+            RB = (RB[0], LT[1]+RB[0]-LT[0])
             ret.append((LT, RB))
         return ret
 
@@ -1600,8 +1632,8 @@ class GaussFitDialog(QDialog):
 
     def resizeImage(self, img):
         img_height, img_width = img.shape
-        scale_w = float(400) / float(img_width)
-        scale_h = float(400) / float(img_height)
+        scale_w = float(396) / float(img_width)
+        scale_h = float(396) / float(img_height)
         scale = min([scale_w, scale_h])
 
         if scale == 0:
@@ -1664,9 +1696,9 @@ class centralWidget(QWidget):
     def initSignal(self):
         self.imageAcquirer.imgSignal.connect(self.update_frame)
         self.imageAcquirer.posSignal.connect(self.applyCenter)
-        # self.imageAcquirer.finished.connect(self.acquisitionFinished)
-
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
+        self.imageProcessor.prgrsSignal.connect(self.setAnalysisProgress)
+
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
         self.imageLoader.gaussFitButton.toggled.connect(self.gaussFitData)
@@ -1737,7 +1769,7 @@ class centralWidget(QWidget):
         self.MarkerY = 0
         self.imgHeight = 600
         self.imgWidth = 600
-        self.markerPos = [400, 300]
+        self.markerPos = [396, 300]
         self.dst = [0,0,0,0]
         self.split = False
         self.Handle = ct.c_int()
@@ -1872,7 +1904,7 @@ class centralWidget(QWidget):
             else:
                 if self.acquisitionWidget.fixedWidget.commentButton.isChecked():
                     mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                    with open(mainDir, "w") as f:
+                    with open(mainDir+"log.txt", "w") as f:
                         f.write(self.acquisitionWidget.fixedWidget.comment)
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
                     if self.specialPrms["mode"] == 1:
@@ -1880,12 +1912,19 @@ class centralWidget(QWidget):
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
                         positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        waitTime = time.time()
+                        while True:
+                            now = time.time()
+                            if (now - 300) > waitTime:
+                                break
                         for pos in positions:
+                            if not self.acquisitionWidget.runButton.isChecked():
+                                break
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
-                                if (now - 3) > waitTime:
+                                if (now - 60) > waitTime:
                                     break
                             self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
@@ -2131,6 +2170,9 @@ class centralWidget(QWidget):
                 self.imageLoader.gaussFitButton.setChecked(False)
                 logging.warning("No results to show")
 
+    def setAnalysisProgress(self, progress):
+        self.imageLoader.progressBar.setValue(progress)
+
     def analyzeDatas(self):
         self.applyProcessSettings()
         logging.info("applySettings")
@@ -2147,14 +2189,32 @@ class centralWidget(QWidget):
                                       self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old)
             self.imageProcessor.run()
         else:
-            datFile = self.imageLoader.dirname +"/spool.dat"
-            processData = (datFile, start, end, self.imageLoader.imgSize)
-            logging.info("setup")
-            self.imageProcessor.setup(processData, self.imageLoader.width,
-                                      self.imageLoader.height, self.imageLoader.stride,
-                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
-                                      self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
-            self.imageProcessor.run()
+            if self.imageLoader.anlzCheck.isChecked():
+                filterText = self.imageLoader.anlzFilter.text()
+                filterDirs = glob(filterText)
+                for dir in filterDirs:
+                    datFile = dir +"/spool.dat"
+                    with open(datFile, mode="r+b") as f:
+                        with mmap.mmap(f.fileno(), 0) as mm:
+                            processData = (datFile, start, end, self.imageLoader.imgSize)
+                            logging.info("setup")
+                            self.imageProcessor.setup(processData, self.imageLoader.width,
+                                                      self.imageLoader.height, self.imageLoader.stride,
+                                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                                      dir, self.imageLoader.progressBar, self.imageLoader.old, mm)
+                            self.imageProcessor.run()
+                            while not self.imageProcessor.stopped:
+                                pass
+
+            else:
+                datFile = self.imageLoader.dirname +"/spool.dat"
+                processData = (datFile, start, end, self.imageLoader.imgSize)
+                logging.info("setup")
+                self.imageProcessor.setup(processData, self.imageLoader.width,
+                                          self.imageLoader.height, self.imageLoader.stride,
+                                          self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                          self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
+                self.imageProcessor.run()
 
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
@@ -2317,6 +2377,7 @@ class mainWindow(QMainWindow):
         fileMenu.addAction(exitAct)
 
         self.setWindowTitle('Andor_CMOS')
+        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint | Qt.WindowMaximizeButtonHint)
 
         self.show()
 
