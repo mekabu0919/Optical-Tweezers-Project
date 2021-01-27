@@ -1888,6 +1888,33 @@ class centralWidget(QWidget):
             else:
                 self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
+    def repeatAcquisition(self):
+        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+        repeat = self.specialPrms["repeat"]
+        self.shutterWidget.closeButton.click()
+        QApplication.processEvents()
+        logging.info('Acquisition start')
+        for i in range(repeat*2):
+            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText("Measurement "+str(i%2+1)+" / Cycle "+str(i//2+1))
+            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                     num=ct.c_int(num), count_p=count_p)
+            self.imageAcquirer.start()
+            ref = count.value
+            while not self.imageAcquirer.stopped:
+                if count.value > (ref + 5):
+                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                    QApplication.processEvents()
+                    ref = count.value
+            count = ct.c_int(0)
+            count_p = ct.pointer(count)
+            self.shutterWidget.change()
+            waitTime = time.time()
+            while True:
+                now = time.time()
+                if (now - 3) > waitTime:
+                    break
+
     def startAcquisition(self, checked):
         if checked:
             count = ct.c_int(0)
@@ -1956,46 +1983,11 @@ class centralWidget(QWidget):
                                 now = time.time()
                                 if (now - 3) > waitTime:
                                     break
-                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
-                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
-                                                     num=ct.c_int(num), count_p=count_p)
-                            self.imageAcquirer.start()
-                            ref = count.value
-                            while not self.imageAcquirer.stopped:
-                                if count.value > (ref + 5):
-                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
-                                    QApplication.processEvents()
-                                    ref = count.value
-                            count = ct.c_int(0)
-                            count_p = ct.pointer(count)
+                            self.repeatAcquisition()
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                     elif self.specialPrms["repeatCheck"]:
-                        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                        repeat = self.specialPrms["repeat"]
-                        self.shutterWidget.closeButton.click()
-                        QApplication.processEvents()
-                        logging.info('Acquisition start')
-                        for i in range(repeat*2):
-                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText("Measurement "+str(i%2+1)+" / Cycle "+str(i//2+1))
-                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
-                                                     num=ct.c_int(num), count_p=count_p)
-                            self.imageAcquirer.start()
-                            ref = count.value
-                            while not self.imageAcquirer.stopped:
-                                if count.value > (ref + 5):
-                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
-                                    QApplication.processEvents()
-                                    ref = count.value
-                            count = ct.c_int(0)
-                            count_p = ct.pointer(count)
-                            self.shutterWidget.change()
-                            waitTime = time.time()
-                            while True:
-                                now = time.time()
-                                if (now - 3) > waitTime:
-                                    break
+                        self.repeatAcquisition()
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                 else:
