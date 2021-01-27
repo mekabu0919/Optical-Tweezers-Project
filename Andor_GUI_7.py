@@ -1888,7 +1888,7 @@ class centralWidget(QWidget):
             else:
                 self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
-    def repeatAcquisition(self):
+    def repeatAcquisition(self, count, count_p):
         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
         num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
         repeat = self.specialPrms["repeat"]
@@ -1987,7 +1987,7 @@ class centralWidget(QWidget):
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                     elif self.specialPrms["repeatCheck"]:
-                        self.repeatAcquisition()
+                        self.repeatAcquisition(count, count_p)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                 else:
