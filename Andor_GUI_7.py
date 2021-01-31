@@ -804,7 +804,7 @@ class imageLoader(QWidget):
         self.dirBox.setText(dirname)
         metafile = dirname + r'\metaSpool.txt'
         if os.path.isfile(metafile):
-            if not self.mm is None:
+            if type(self.mm) is mmap.mmap:
                 self.mm.close()
                 self.f.close()
             self.dirname = dirname
@@ -1400,16 +1400,20 @@ class SpecialMeasurementDialog(QDialog):
         self.repeat = 0
         self.repeatCheck = False
 
-        self.piezoCheckBox = QRadioButton("Piezo Measurement", self)
+        self.piezoCheckBox = QCheckBox("Piezo Measurement", self)
         self.startBox = QDoubleSpinBox(self)
         self.endBox = QDoubleSpinBox(self)
         self.stepBox = QDoubleSpinBox(self)
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
 
-        self.tiltCheckBox = QRadioButton("Tilt Measurement", self)
+        self.tiltCheckBox = QCheckBox("Tilt Measurement", self)
         self.tiltStartBox = QDoubleSpinBox(self)
+        self.tiltStartBox.setMinimum(-10)
+        self.tiltStartBox.setMaximum(10)
         self.tiltEndBox = QDoubleSpinBox(self)
+        self.tiltEndBox.setMinimum(-10)
+        self.tiltEndBox.setMaximum(10)
         self.tiltStepBox = QDoubleSpinBox(self)
         self.tiltStepBox.setDecimals(3)
         self.tiltNumBox = QSpinBox(self)
@@ -1589,8 +1593,8 @@ class GaussFitDialog(QDialog):
 
         self.rawImageWidet = MyImageWidget(self)
         self.fittedImageWidget = MyImageWidget(self)
-        self.prmsTable = QTableWidget(1,6,self)
-        self.prmsTable.setHorizontalHeaderLabels(["Area", "Amp.", "Cx", "Cy", "Sx", "Sy", "Background"])
+        self.prmsTable = QTableWidget(1,8,self)
+        self.prmsTable.setHorizontalHeaderLabels(["Area", "Amp.", "Cx", "Cy", "Sx", "Sy", "Background", "delta"])
         self.leftButton = QToolButton()
         self.leftButton.setArrowType(Qt.LeftArrow)
         self.rightButton = QToolButton()
@@ -1983,7 +1987,7 @@ class centralWidget(QWidget):
                                 now = time.time()
                                 if (now - 3) > waitTime:
                                     break
-                            self.repeatAcquisition()
+                            self.repeatAcquisition(count, count_p)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                     elif self.specialPrms["repeatCheck"]:
@@ -2151,6 +2155,8 @@ class centralWidget(QWidget):
                     logging.warning("fitting failed at area "+str(i))
                 else:
                     prms = np.insert(prms, 0, i)
+                    delta = (prms[4]-prms[5])/(prms[4]+prms[5])
+                    prms = np.append(prms, delta)
                     areaResults.append([areaImg, fitted, prms, cov])
             if areaResults:
                 self.gaussFitDialog.results = areaResults
