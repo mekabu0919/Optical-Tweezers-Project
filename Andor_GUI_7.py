@@ -1190,7 +1190,7 @@ class SLM_Controller(QGroupBox):
         rotX = X*np.sin(self.theta) + Y*np.cos(self.theta)
         rotY = X*np.cos(self.theta) - Y*np.sin(self.theta)
 
-        img = (rotX // self.pitch % 2) * 128 * m + (rotY // self.pitch % 2) * 128 * np.sqrt(1 - m**2)
+        img = (rotX // self.pitch % 2) * 128 * m + (rotY // self.pitch % 2) * 128 * (1 - m)
         img = (img + self.base).astype(np.uint8)
         img = img.astype(np.float) * self.alpha / 255
         self.w.img = img.astype(np.uint8)
