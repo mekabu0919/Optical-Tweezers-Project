@@ -1080,13 +1080,20 @@ class SLM_Controller(QGroupBox):
         self.focusXBox.valueChanged.connect(self.focusChanged)
         self.focusYBox.valueChanged.connect(self.focusChanged)
 
+        self.intModBox = QDoubleSpinBox(self)
+        self.intModBox.setMaximum(1.0)
+        self.intModBox.setMinimum(0.0)
+        self.intModBox.setDecimals(2)
+        self.intModBox.setSingleStep(0.1)
+        self.intModBox.valueChanged.connect(self.intensityModulationChanged)
+
         self.alignmentToolButton = QPushButton("Alignment Tool", self)
         self.alignmentToolButton.setCheckable(True)
         self.alignmentToolButton.toggled.connect(self.switchMask)
-        self.aspectBox = QDoubleSpinBox(self)
-        self.aspectBox.setDecimals(3)
-        self.aspectBox.setSingleStep(0.01)
-        self.aspectBox.valueChanged.connect(self.aspectChanged)
+        # self.aspectBox = QDoubleSpinBox(self)
+        # self.aspectBox.setDecimals(3)
+        # self.aspectBox.setSingleStep(0.01)
+        # self.aspectBox.valueChanged.connect(self.aspectChanged)
 
         self.initLayout()
 
@@ -1120,7 +1127,7 @@ class SLM_Controller(QGroupBox):
         vbox00.addWidget(TiltBox)
 
         vbox01 = QVBoxLayout()
-        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014, LHLayout("Aspect Ratio", self.aspectBox), self.alignmentToolButton])
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014, LHLayout("Intensity Modulation", self.intModBox), self.alignmentToolButton])
 
         hbox0 = QHBoxLayout(self)
         hbox0.addLayout(vbox01)
@@ -1144,6 +1151,7 @@ class SLM_Controller(QGroupBox):
         self.tiltX = 0
         self.tiltY = 0
         self.mask = 0
+        self.intMod = 0.5
         self.aspectRatio = 1.0
 
     def switch_SLM(self, checked):
@@ -1174,6 +1182,7 @@ class SLM_Controller(QGroupBox):
         self.w.img = img.astype(np.uint8)
 
     def update_img(self):
+        m = self.intMod
         x = np.arange(792)*self.aspectRatio
         y = np.arange(600)
         X, Y = np.meshgrid(x, y)
@@ -1181,7 +1190,7 @@ class SLM_Controller(QGroupBox):
         rotX = X*np.sin(self.theta) + Y*np.cos(self.theta)
         rotY = X*np.cos(self.theta) - Y*np.sin(self.theta)
 
-        img = ((rotX // self.pitch + rotY // self.pitch) % 2) * 128
+        img = (rotX // self.pitch % 2) * 128 * m + (rotY // self.pitch % 2) * 128 * np.sqrt(1 - m**2)
         img = (img + self.base).astype(np.uint8)
         img = img.astype(np.float) * self.alpha / 255
         self.w.img = img.astype(np.uint8)
@@ -1231,11 +1240,17 @@ class SLM_Controller(QGroupBox):
         if self.SLMButton.isChecked():
             self.modulate_SLM(self.modulateButton.isChecked())
 
-    def aspectChanged(self, val):
-        self.aspectRatio = self.aspectBox.value()
+    def intensityModulationChanged(self, val):
+        self.intMod = val
         self.make_base()
         if self.SLMButton.isChecked():
             self.modulate_SLM(self.modulateButton.isChecked())
+
+    # def aspectChanged(self, val):
+    #     self.aspectRatio = self.aspectBox.value()
+    #     self.make_base()
+    #     if self.SLMButton.isChecked():
+    #         self.modulate_SLM(self.modulateButton.isChecked())
 
 
 class DIOWidget(QGroupBox):
@@ -2282,7 +2297,8 @@ class centralWidget(QWidget):
         self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
         self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
         self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
-        self.SLM_Controller.aspectBox.setValue(settings.value('SLM aspect', 1, type=float))
+        self.SLM_Controller.intModBox.setValue(settings.value('SLM int mod', 0.5, type=float))
+        # self.SLM_Controller.aspectBox.setValue(settings.value('SLM aspect', 1, type=float))
 
     def writeSettings(self):  # Save current settings
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -2312,7 +2328,8 @@ class centralWidget(QWidget):
         self.settings.setValue('SLM focus', self.SLM_Controller.focusBox.value())
         self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
         self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
-        self.settings.setValue('SLM aspect', self.SLM_Controller.aspectBox.value())
+        self.settings.setValue('SLM int mod', self.SLM_Controller.intModBox.value())
+        # self.settings.setValue('SLM aspect', self.SLM_Controller.aspectBox.value())
 
     def showTemperature(self):
         temp = ct.c_double()
