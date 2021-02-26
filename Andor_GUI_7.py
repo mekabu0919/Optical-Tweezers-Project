@@ -1860,7 +1860,9 @@ class centralWidget(QWidget):
 
     def calcDst(self):
         size = max([self.acquisitionWidget.AOIWidth, self.acquisitionWidget.AOIHeight])
-        vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
+        # vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
+        # *self.MarkerFactor*600/size/self.SLM_Controller.pitch
+        vec = np.array([np.cos(self.SLM_Controller.theta), np.sin(self.SLM_Controller.theta)])\
         *self.MarkerFactor*600/size/self.SLM_Controller.pitch
         markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
         self.markerPos = markerPos.astype(np.uint16).tolist()
