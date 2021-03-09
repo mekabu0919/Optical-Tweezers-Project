@@ -9,6 +9,9 @@ import pandas as pd
 import cv2
 import logging
 import socket
+import mmap
+import MyModules.gaussfit as gf
+import matplotlib.pyplot as plt
 from glob import glob
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import QDir, Qt, QSettings, QTimer
@@ -102,23 +105,27 @@ class ImageAcquirer(QtCore.QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.stopped = False
+        self.stopDll = ct.c_bool(False)
         self.mutex = QtCore.QMutex()
 
-    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **prms):
+    def setup(self, Handle, dir=None, fixed=0, mode=0, center=None, **args):
         self.Handle = Handle
         self.dir = dir
         self.fixed = fixed
         self.mode = mode
-        self.prms = prms
+        self.args = args
+        self.areaIsSelected = False
+        self.selectedAreas = []
         if center is None:
             self.center = (ct.c_float*2)(0.0, 0.0)
         else:
             self.center = (ct.c_float*2)(center[0], center[1])
-
+        self.stopDll.value = False
         self.stopped = False
 
     def stop(self):
         with QtCore.QMutexLocker(self.mutex):
+            self.stopDll.value = True
             self.stopped = True
 
     def run(self):
@@ -126,13 +133,13 @@ class ImageAcquirer(QtCore.QThread):
             return
         if self.fixed == 0:
             if self.mode==0:
-                dll.startFixedAcquisition(self.Handle, self.dir, self.prms["num"], self.prms["count_p"])
+                dll.startFixedAcquisitionFile(self.Handle, self.dir, self.args["num"], self.args["count_p"], ct.byref(self.stopDll))
             elif self.mode==1:
                 self.prepareAcquisition()
             elif self.mode==2:
                 self.feedbackedAcquisition()
             else:
-                dll.startFixedAcquisitionPiezo(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms["piezoID"])
+                dll.startFixedAcquisitionFilePiezo(self.Handle, self.dir, self.args["num"], self.args["count_p"], ct.byref(self.stopDll), self.args["piezoID"])
         else:
             self.continuousAcquisition()
         self.stop()
@@ -170,6 +177,9 @@ class ImageAcquirer(QtCore.QThread):
                                      outBuffer, ct.byref(maxVal), ct.byref(minVal))
                 self.max, self.min = maxVal.value, minVal.value
                 self.img = np.array(outBuffer).reshape(ImageHeight.value, ImageWidth.value)
+                if self.areaIsSelected:
+                    for area in self.selectedAreas:
+                        self.img = cv2.rectangle(self.img, area[0], area[1], 127, 3)
                 self.width, self.height = ImageWidth.value, ImageHeight.value
                 self.imgSignal.emit(self)
                 dll.QueueBuffer(self.Handle, Buffer, BufferSize)
@@ -185,14 +195,14 @@ class ImageAcquirer(QtCore.QThread):
     def prepareAcquisition(self):
 
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
-        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.prms,
+        point, self.center, ct.c_float(self.args["DIOthres"]), self.args["DIOhandle"], ct.c_int(self.mode))
         self.posSignal.emit(point[0], point[1])
 
     def feedbackedAcquisition(self):
         point = (ct.c_float*2)()
-        dll.multithread(self.Handle, self.dir, self.prms["num"], self.prms["count_p"], self.prms,
-        point, self.center, ct.c_float(self.prms["DIOthres"]), self.prms["DIOhandle"], ct.c_int(self.mode))
+        dll.multithread(self.Handle, self.dir, self.args["num"], self.args["count_p"], self.prms,
+        point, self.center, ct.c_float(self.args["DIOthres"]), self.args["DIOhandle"], ct.c_int(self.mode))
 
 
 class ImagePlayer(QtCore.QThread):
@@ -229,19 +239,25 @@ class ImagePlayer(QtCore.QThread):
 
 class ImageProcessor(QtCore.QThread):
 
+    prgrsSignal = QtCore.pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.stopped = False
         self.mutex = QtCore.QMutex()
 
-    def setup(self, datfiles, width, height, stride, prms, dir, pBar):
+    def setup(self, datfiles, width, height, stride, prms, gfchecked, selectedAreas, dir, pBar, old, mm=None):
         self.datfiles = datfiles
         self.width = width
         self.height = height
         self.stride = stride
         self.prms = prms
+        self.gfchecked = gfchecked
+        self.selectedAreas = selectedAreas
         self.dir = dir
         self.pBar = pBar
+        self.old = old
+        self.mm = mm
         self.stopped = False
 
     def stop(self):
@@ -251,22 +267,101 @@ class ImageProcessor(QtCore.QThread):
     def run(self):
         if self.stopped:
             return
-        ImgArry = (ct.c_ushort * (self.width * self.height))()
-        point = (ct.c_float*2)()
-        pointlst = []
-        num = len(self.datfiles)
-        self.pBar.setMaximum(num-1)
-        for datfile, i in zip(self.datfiles, range(num)):
-            rawdata = np.fromfile(datfile, dtype=np.uint8)
-            buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-            ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
-            dll.processImage(point, self.height, self.width, ImgArry, self.prms)
-            pointlst.append([point[0], point[1]])
-            self.pBar.setValue(i)
-        DF = pd.DataFrame(np.array(pointlst))
-        DF.columns = ['x', 'y']
-        DF.to_csv(self.dir + r"\COG.csv")
-        logging.info("analysis finished")
+        if self.old:
+            ImgArry = (ct.c_ushort * (self.width * self.height))()
+            point = (ct.c_float*2)()
+            pointlst = []
+            num = len(self.datfiles)
+            self.pBar.setMaximum(num-1)
+            for datfile, i in zip(self.datfiles, range(num)):
+                rawdata = np.fromfile(datfile, dtype=np.uint8)
+                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
+                dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                pointlst.append([point[0], point[1]])
+                ## z-position detection
+
+                self.prgrsSignal.emit(i)
+            DF = pd.DataFrame(np.array(pointlst))
+            DF.columns = ['x', 'y']
+            DF.to_csv(self.dir + r"\COG.csv")
+            logging.info("analysis finished")
+        else:
+            ImgArry = (ct.c_ushort * (self.width * self.height))()
+            point = (ct.c_float*2)()
+            pointlst = []
+            prmsList = []
+            datfile, start, end, imgSize = self.datfiles
+            num = end - start
+            self.pBar.setMaximum(num-1)
+            self.mm.seek(imgSize*start)
+            logText = ""
+            for i in range(num):
+                rawdata = self.mm.read(imgSize)
+                buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+                ret = dll.convertBuffer(buffer, ImgArry, self.width, self.height, self.stride)
+                if self.gfchecked:
+                    imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
+                    for area, j in zip(self.selectedAreas, range(len(self.selectedAreas))):
+                        prmList = []
+                        LT, RB = area
+                        width = RB[0] - LT[0]
+                        height = RB[1] - LT[1]
+                        areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                        gaussfit = gf.GaussFit(areaImg)
+                        try:
+                            fitted, prms, cov = gaussfit.fit()
+                        except RuntimeError:
+                            prmList.append(i)
+                            prmList.append(j)
+                            prmList += [None]*14
+                            prmsList.append(prmList)
+                            logText += f"Fitting failed at area {j} in shot {i}\n"
+                        else:
+                            prmList.append(i)
+                            prmList.append(j)
+                            prmList.append(LT[0])
+                            prmList.append(LT[1])
+                            prmList += list(prms)
+                            err = np.sqrt(np.diag(cov))
+                            prmList += list(err)
+                            prmsList.append(prmList)
+                    self.prgrsSignal.emit(i)
+                else:
+                    if self.selectedAreas:
+                        imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
+                        for area, j in zip(self.selectedAreas, range(len(self.selectedAreas))):
+                            prmList = []
+                            LT, RB = area
+                            width = RB[0] - LT[0]
+                            height = RB[1] - LT[1]
+                            areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                            areaImg_np = np.copy(areaImg)
+                            areaImgC = areaImg_np.ctypes.data_as(ct.POINTER(ct.c_ushort * (width*height)))
+                            areaImgC_pt = ct.cast(areaImgC, ct.POINTER(ct.c_ushort))
+                            point = (ct.c_float*2)()
+                            dll.processImage(point, height, width, areaImgC_pt, self.prms)
+                            pointlst.append([point[0]+LT[0], point[1]+LT[1]])
+                        self.prgrsSignal.emit(i)
+
+                    else:
+                        dll.processImage(point, self.height, self.width, ImgArry, self.prms)
+                        pointlst.append([point[0], point[1]])
+                        self.prgrsSignal.emit(i)
+            if pointlst:
+                DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
+                columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
+                DF.columns = columnNames
+                DF.to_csv(self.dir + r"\COG.csv", index=False)
+            if prmsList:
+                DF = pd.DataFrame(np.array(prmsList))
+                columnNames = ["shotNumber", "areaNumber", "Left", "Top", "Amp.", "Cx", "Cy", "Sx", "Sy", "Base", "E_Amp.", "E_Cx", "E_Cy", "E_Sx", "E_Sy", "E_Base"]
+                DF.columns = columnNames
+                DF.to_csv(self.dir + r"\FittingResults.csv", index=False)
+                with open(self.dir + r"\FittingLog.txt", "w") as f:
+                    f.write(logText)
+            logging.info("analysis finished")
+        self.stopped = True
 
 
 # class definition for UI
@@ -278,6 +373,8 @@ def setListToLayout(layout, list):
         else:
             layout.addWidget(object)
 
+
+# Layout of labeled widget
 class LHLayout(QHBoxLayout):
     def __init__(self, label, object, parent=None):
         super(QHBoxLayout, self).__init__(parent)
@@ -290,7 +387,7 @@ class LHLayout(QHBoxLayout):
             self.addWidget(object)
 
 
-class OwnImageWidget(QWidget):
+class MyImageWidget(QWidget):
     posSignal = QtCore.pyqtSignal(QtCore.QPoint)
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -319,7 +416,7 @@ class PosLabeledImageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.imageWidget = OwnImageWidget(self)
+        self.imageWidget = MyImageWidget(self)
         self.posLabel = QLabel("Position:")
 
         vbox = QVBoxLayout(self)
@@ -334,11 +431,20 @@ class PosLabeledImageWidget(QWidget):
         self.imageWidget.setImage(image)
 
 
-class SLMWindow(QDialog):
+class SLMWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.canvas = OwnImageWidget(self)
+        self.canvas = MyImageWidget(self)
+        self.canvas.setMinimumSize(792,600)
+
         self.img = None
+
+        desktop = app.desktop()
+        left = desktop.availableGeometry(1).left()
+        top = desktop.availableGeometry(1).top()
+        self.move(left, top)
+
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.BypassWindowManagerHint)
 
     def update_SLM(self):
         img = cv2.cvtColor(self.img, cv2.COLOR_GRAY2RGB)
@@ -356,43 +462,73 @@ class contWidget(QWidget):
 
     def initUI(self):
         self.imgMaxBox = QLineEdit(self)
-        self.imgMaxBox.setReadOnly(True)
-        self.imgMaxBox.setSizePolicy((QSizePolicy(5, 0)))
         self.imgMinBox = QLineEdit(self)
+        self.imgMaxBox.setReadOnly(True)
         self.imgMinBox.setReadOnly(True)
+        self.imgMaxBox.setSizePolicy((QSizePolicy(5, 0)))
         self.imgMinBox.setSizePolicy((QSizePolicy(5, 0)))
+
         self.markerPositionBoxX = QSpinBox(self)
-        self.markerPositionBoxX.setMaximum(400)
-        self.markerPositionBoxX.setMinimum(-400)
         self.markerPositionBoxY = QSpinBox(self)
-        self.markerPositionBoxY.setMaximum(400)
-        self.markerPositionBoxY.setMinimum(-400)
+        self.markerPositionBoxX.setMaximum(396)
+        self.markerPositionBoxY.setMaximum(396)
+        self.markerPositionBoxX.setMinimum(-396)
+        self.markerPositionBoxY.setMinimum(-396)
         self.markerFactorBox = QSpinBox(self)
         self.markerFactorBox.setRange(0, 9999)
-        self.splitButton = QPushButton("Split", self)
-        self.splitButton.setCheckable(True)
+        self.splitButton = QCheckBox("Split", self)
 
         self.initLayout()
 
     def initLayout(self):
 
-        hbox00 = QVBoxLayout()
-        setListToLayout(hbox00, [QLabel("Raw Image"), LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
+        RawImgLayout = QVBoxLayout()
+        RawImgGroup = QGroupBox("Raw Image", self)
+        RawImgGroup.setLayout(RawImgLayout)
+        setListToLayout(RawImgLayout, [LHLayout('Min: ', self.imgMinBox), LHLayout('Max: ', self.imgMaxBox)])
 
-        hbox01 = QVBoxLayout()
-        setListToLayout(hbox01, [QLabel("Marker Position"), LHLayout('x: ', self.markerPositionBoxX), \
-                                 LHLayout('y: ', self.markerPositionBoxY), LHLayout('factor: ', [self.markerFactorBox, self.splitButton])])
+        MarkerLayout = QVBoxLayout()
+        posLayout = QGridLayout()
+        posLayout.addWidget(QLabel("Position"), 0, 0)
+        posLayout.addLayout(LHLayout('x: ', self.markerPositionBoxX), 0, 1)
+        posLayout.addLayout(LHLayout('y: ', self.markerPositionBoxY), 1, 1)
+        splitLayout = QHBoxLayout()
+        splitLayout.addWidget(self.splitButton)
+        splitLayout.addLayout(LHLayout('factor: ', self.markerFactorBox))
+        MarkerGroup = QGroupBox("Marker", self)
+        MarkerGroup.setLayout(MarkerLayout)
+        setListToLayout(MarkerLayout, [posLayout, splitLayout])
 
-        hbox0 = QHBoxLayout(self)
-        setListToLayout(hbox0, [hbox00, hbox01])
-        hbox0.setStretch(0, 1)
-        hbox0.setStretch(1, 1)
+        MainLayout = QHBoxLayout(self)
+        setListToLayout(MainLayout, [RawImgGroup, MarkerGroup])
+        MainLayout.setStretch(0, 1)
+        MainLayout.setStretch(1, 1)
+
+
+class CommentDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.textEdit = QTextEdit(self)
+        self.applyButton = QPushButton("Apply")
+        self.cancelButton = QPushButton("Cancel")
+
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.applyButton)
+        bottomLayout.addWidget(self.cancelButton)
+        mainLayout = QVBoxLayout(self)
+        mainLayout.addWidget(self.textEdit)
+        mainLayout.addLayout(bottomLayout)
+
+        self.applyButton.clicked.connect(self.accept)
+        self.cancelButton.clicked.connect(self.reject)
 
 
 class fixedWidget(QWidget):
 
     def __init__(self, parent=None):
         super(QWidget, self).__init__(parent)
+
+        self.comment = ""
 
         self.initUI()
 
@@ -404,40 +540,128 @@ class fixedWidget(QWidget):
         self.dirBox = QLineEdit(self)
         self.dirBox.setReadOnly(True)
         self.dirButton = QPushButton('...', self)
+        self.dirButton.setMaximumWidth(20)
         self.dirButton.clicked.connect(self.selectDirectory)
         self.aqTypeBox = QComboBox(self)
         aqTypeList = ['No feed-back', 'Preparation', 'Do feed-back']
         self.aqTypeBox.addItems(aqTypeList)
-        self.cntrPosLabel = QLabel("Centre of position:", self)
+        self.cntrPosBox = QLineEdit(self)
         self.thresBox = QDoubleSpinBox(self)
         self.specialButton = QPushButton('Special Measurement', self)
         self.specialButton.setCheckable(True)
         self.currentRepeatBox = QLineEdit(self)
         self.currentRepeatBox.setReadOnly(True)
         self.currentRepeatBox.setSizePolicy(QSizePolicy(5, 0))
+        self.commentButton = QPushButton("Comment")
+        self.commentButton.setCheckable(True)
+        self.commentButton.toggled.connect(self.commentEdit)
+        self.commentDialog = CommentDialog(self)
+        self.commentDialog.setWindowTitle("Comment")
 
         self.initLayout()
 
     def initLayout(self):
-        hbox00 = QHBoxLayout()
-        setListToLayout(hbox00, [LHLayout("Frames", self.numImgBox), LHLayout("Frame Rate", self.frameRateBox), \
-                                 LHLayout("Directory: ", [self.dirBox, self.dirButton]), LHLayout("Current Frame", self.countBox)])
+        leftGridLayout = QGridLayout()
+        leftGridLayout.addWidget(QLabel("Frames:"), 0, 0)
+        leftGridLayout.addWidget(self.numImgBox, 0, 1)
+        leftGridLayout.addWidget(QLabel("Frame Rate:"), 1, 0)
+        leftGridLayout.addWidget(self.frameRateBox, 1, 1)
+        dirLayout = QHBoxLayout()
+        dirLayout.addWidget(self.dirBox)
+        dirLayout.addWidget(self.dirButton)
+        leftGridLayout.addWidget(QLabel("Directory:"), 2, 0)
+        leftGridLayout.addLayout(dirLayout, 2, 1)
+        leftGridLayout.addWidget(QLabel("Current Frame:"), 3, 0)
+        leftGridLayout.addWidget(self.countBox, 3, 1)
+        leftGridLayout.addWidget(self.commentButton, 4, 0)
+        leftGridLayout.setColumnStretch(0, 1)
+        leftGridLayout.setColumnStretch(1, 1)
 
-        hbox01 = QHBoxLayout()
-        setListToLayout(hbox01, [self.aqTypeBox, self.cntrPosLabel, LHLayout("Threshold: ", self.thresBox)])
+        rightGridLayout = QGridLayout()
+        i = 0
+        for label, widget in [("Feedback:", self.aqTypeBox), ("Potential Center:", self.cntrPosBox), ("Threshold: ", self.thresBox)]:
+            rightGridLayout.addWidget(QLabel(label), i, 0)
+            rightGridLayout.addWidget(widget, i, 1)
+            i += 1
+        rightGridLayout.addWidget(self.specialButton, 3, 0)
+        rightGridLayout.addWidget(self.currentRepeatBox, 3, 1)
+        rightGridLayout.setColumnStretch(0, 1)
+        rightGridLayout.setColumnStretch(1, 1)
 
-        hbox02 = QHBoxLayout()
-        hbox02.addWidget(self.specialButton)
-        hbox02.addWidget(self.currentRepeatBox)
-
-        vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [hbox00, hbox01, hbox02])
+        mainLayout = QHBoxLayout(self)
+        mainLayout.addLayout(leftGridLayout)
+        mainLayout.addSpacing(20)
+        mainLayout.addLayout(rightGridLayout)
 
     def selectDirectory(self):
         self.dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
         self.dirname = QDir.toNativeSeparators(self.dirname)
         self.dirBox.setText(self.dirname)
 
+    def commentEdit(self, checked):
+        if checked:
+            if self.commentDialog.exec_():
+                self.comment = self.commentDialog.textEdit.document()
+            else:
+                self.commentButton.setChecked(False)
+
+
+class AOISettingBox(QGroupBox):
+
+    def __init__(self, parent=None):
+        super().__init__("AOI Settings", parent)
+
+        self.defaultCheck = QRadioButton("Default")
+        self.defaultCheck.setChecked(True)
+
+        self.AOISizeBox = QComboBox(self)
+        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128']
+        self.AOISizeBox.addItems(AOISizeList)
+
+        self.CenterXBox = QSpinBox(self)
+        self.CenterYBox = QSpinBox(self)
+        self.CenterXBox.setMinimum(-1024)
+        self.CenterYBox.setMinimum(-1024)
+        self.CenterXBox.setMaximum(1024)
+        self.CenterYBox.setMaximum(1024)
+
+        self.customCheck = QRadioButton("Customized")
+
+        self.AOILeftBox = QSpinBox(self)
+        self.AOITopBox = QSpinBox(self)
+        self.AOIWidthBox = QSpinBox(self)
+        self.AOIHeightBox = QSpinBox(self)
+        AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
+        for obj in AOIBoxList:
+            obj.setMaximum(2048)
+
+        self.AOIButtons = QButtonGroup(self)
+        self.AOIButtons.addButton(self.defaultCheck)
+        self.AOIButtons.addButton(self.customCheck)
+        self.AOIButtons.setExclusive(True)
+        self.AOIButtons.setId(self.defaultCheck, 0)
+        self.AOIButtons.setId(self.customCheck, 1)
+
+        defaultLayout = QVBoxLayout()
+        defaultLayout.addWidget(self.defaultCheck)
+        defaultLayout.addLayout(LHLayout("Size:", self.AOISizeBox))
+        defaultCenterLayout = QHBoxLayout()
+        setListToLayout(defaultCenterLayout, [LHLayout("X Center:", self.CenterXBox), LHLayout("Y Center:", self.CenterYBox)])
+        defaultLayout.addLayout(defaultCenterLayout)
+
+        customLayout = QVBoxLayout()
+        customLayout.addWidget(self.customCheck)
+        customParamsLayout = QGridLayout()
+        customParamsLayout.addLayout(LHLayout("Left: ", self.AOILeftBox), 0, 1)
+        customParamsLayout.addLayout(LHLayout("Top: ", self.AOITopBox), 0, 0)
+        customParamsLayout.addLayout(LHLayout("Width: ", self.AOIWidthBox), 1, 0)
+        customParamsLayout.addLayout(LHLayout("Height: ", self.AOIHeightBox), 1, 1)
+        customLayout.addLayout(customParamsLayout)
+
+        MainLayout = QHBoxLayout(self)
+        MainLayout.addLayout(defaultLayout)
+        MainLayout.addSpacing(20)
+        MainLayout.addLayout(customLayout)
 
 class AcquisitionWidget(QWidget):
 
@@ -447,16 +671,15 @@ class AcquisitionWidget(QWidget):
         self.contWidget = contWidget(self)
         self.fixedWidget = fixedWidget(self)
 
+        self.AOI = AOISettingBox(self)
         self.AOIWidth = self.AOIHeight = 2048
 
         self.Tab = QTabWidget()
-        self.Tab.addTab(self.contWidget, 'Continuous')
-        self.Tab.addTab(self.fixedWidget, 'Fixed')
+        self.Tab.addTab(self.contWidget, 'Live Image')
+        self.Tab.addTab(self.fixedWidget, 'Recording')
 
         self.initUI()
-        self.AOISizeBox.currentIndexChanged.connect(self.setAOISize)
-        self.AOIWidthBox.valueChanged.connect(self.setAOISize)
-        self.AOIHeightBox.valueChanged.connect(self.setAOISize)
+        # self.AOI.AOIButtons.buttonClicked.connect(self.setAOISize)
 
     def initUI(self):
         self.handleBox = QLineEdit(self)
@@ -464,65 +687,46 @@ class AcquisitionWidget(QWidget):
         self.handleBox.setSizePolicy(QSizePolicy(5, 0))
         self.exposeTBox = QDoubleSpinBox(self)
         self.exposeTBox.setDecimals(5)
-        self.AOISizeBox = QComboBox(self)
-        AOISizeList = ['2048x2048','1024x1024','512x512','256x256','128x128','free']
-        self.AOISizeBox.addItems(AOISizeList)
-        self.AOILeftBox = QSpinBox(self)
-        self.AOITopBox = QSpinBox(self)
-        self.AOIWidthBox = QSpinBox(self)
-        self.AOIHeightBox = QSpinBox(self)
-        AOIBoxList = [self.AOITopBox, self.AOILeftBox, self.AOIWidthBox, self.AOIHeightBox]
-        for obj in AOIBoxList:
-            obj.setMaximum(2048)
-        self.CenterXBox = QSpinBox(self)
-        self.CenterYBox = QSpinBox(self)
-        self.CenterXBox.setMinimum(-1024)
-        self.CenterYBox.setMinimum(-1024)
-        self.CenterXBox.setMaximum(1024)
-        self.CenterYBox.setMaximum(1024)
+
         self.AOIBinBox = QComboBox(self)
         AOIBinList = ["1x1", "2x2", "3x3", "4x4", "8x8"]
         self.AOIBinBox.addItems(AOIBinList)
         self.globalClearButton = QPushButton('Global clear', self)
         self.globalClearButton.setCheckable(True)
 
-        self.initButton = QPushButton("Initialize", self)
+        self.initButton = QPushButton("CONNECT", self)
         self.applyButton = QPushButton('APPLY', self)
-        self.runButton = QPushButton('RUN', self)
-        self.finButton = QPushButton("Finalize", self)
         self.applyButton.setEnabled(False)
+        self.runButton = QPushButton('RUN', self)
         self.runButton.setCheckable(True)
         self.runButton.setEnabled(False)
+        self.finButton = QPushButton("DISCONNECT", self)
         self.finButton.setEnabled(False)
 
         self.initLayout()
 
     def initLayout(self):
-        hbox00 = QHBoxLayout()
-        setListToLayout(hbox00, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
+        topLayout = QHBoxLayout()
+        setListToLayout(topLayout, [LHLayout("Handle: ", self.handleBox), LHLayout('Exposure Time (s): ', self.exposeTBox),\
                                  LHLayout("Binnng: ", self.AOIBinBox), self.globalClearButton])
 
-        hbox01 = QHBoxLayout()
-        setListToLayout(hbox01, [LHLayout("AOI Size: ", self.AOISizeBox), LHLayout("Top: ", self.AOITopBox),\
-                                 LHLayout("Left: ", self.AOILeftBox), LHLayout("Width: ", self.AOIWidthBox),\
-                                 LHLayout("Height: ", self.AOIHeightBox), LHLayout("X: ", self.CenterXBox),\
-                                 LHLayout("Y: ", self.CenterYBox)])
+        bottomLayout = QHBoxLayout()
+        setListToLayout(bottomLayout, [self.initButton, self.applyButton, self.runButton, self.finButton])
 
-        hbox03 = QHBoxLayout()
-        setListToLayout(hbox03, [self.initButton, self.applyButton, self.runButton, self.finButton])
+        mainLayout = QVBoxLayout(self)
+        setListToLayout(mainLayout, [topLayout, self.AOI, self.Tab, bottomLayout])
 
-        vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [hbox00, hbox01, self.Tab, hbox03])
-
-    def setAOISize(self):
-        index = self.AOISizeBox.currentIndex()
-        if  index == 5:
-            self.AOIWidth = self.AOIWidthBox.value()
-            self.AOIHeight = self.AOIHeightBox.value()
-        else:
-            val = 2048/(2**index)
-            self.AOIWidth = val
-            self.AOIHeight = val
+    # def setAOISize(self, button):
+    #     if button is self.AOI.customCheck:
+    #         self.AOIWidth = self.AOI.AOIWidthBox.value()
+    #         self.AOIHeight = self.AOI.AOIHeightBox.value()
+    #         logging.debug("id=1")
+    #     else:
+    #         index = self.AOI.AOISizeBox.currentIndex()
+    #         val = 2048/(2**index)
+    #         logging.debug("id=0")
+    #         self.AOIWidth = val
+    #         self.AOIHeight = val
 
 
 class imageLoader(QWidget):
@@ -556,9 +760,14 @@ class imageLoader(QWidget):
         self.imgMinBox.setReadOnly(True)
         self.imgMinBox.setSizePolicy(QSizePolicy(5, 0))
 
-        self.anlzButton = QPushButton('Analysis', self)
+        self.gaussFitButton = QPushButton("Gauss Fit")
+        self.gaussFitButton.setCheckable(True)
+
+        self.anlzButton = QPushButton('Analyse Position', self)
         self.anlzStartBox = QSpinBox(self)
         self.anlzEndBox = QSpinBox(self)
+        self.anlzCheck = QCheckBox('Multiple Directories', self)
+        self.anlzFilter = QLineEdit(self)
 
         self.progressBar = QProgressBar(self)
         self.progressBar.setMaximum(100)
@@ -566,25 +775,28 @@ class imageLoader(QWidget):
         self.initLayout()
 
     def initLayout(self):
-        hbox01 = QHBoxLayout()
-        hbox01.addLayout(LHLayout("Frames: ", self.fileNumBox))
-        hbox01.addLayout(LHLayout("Current Frame: ", self.currentNumBox))
+        centerLayout = QGridLayout()
+        centerLayout.addLayout(LHLayout("Frames: ", self.fileNumBox), 0, 0)
+        centerLayout.addLayout(LHLayout("Current Frame: ", self.currentNumBox), 0, 1)
+        centerLayout.addLayout(LHLayout("Min: ", self.imgMinBox), 1, 0)
+        centerLayout.addLayout(LHLayout("Max: ", self.imgMaxBox), 1, 1)
+        centerLayout.addLayout(LHLayout("Start: ", self.anlzStartBox), 2, 0)
+        centerLayout.addLayout(LHLayout("End: ", self.anlzEndBox), 2, 1)
 
-        hbox02 = QHBoxLayout()
-        hbox02.addLayout(LHLayout("Min: ", self.imgMinBox))
-        hbox02.addLayout(LHLayout("Max: ", self.imgMaxBox))
-
-        hbox03 = QHBoxLayout()
-        hbox03.addWidget(self.anlzButton)
-        hbox03.addLayout(LHLayout("Start: ", self.anlzStartBox))
-        hbox03.addLayout(LHLayout("End: ", self.anlzEndBox))
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.anlzButton)
+        bottomLayout.addWidget(self.anlzCheck)
+        bottomLayout.addWidget(self.anlzFilter)
 
         vbox0 = QVBoxLayout(self)
-        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), hbox01, hbox02, hbox03, self.progressBar])
+        setListToLayout(vbox0, [LHLayout("Directory: ", [self.dirBox, self.dirButton]), centerLayout, self.gaussFitButton, bottomLayout, self.progressBar])
 
     def initVal(self):
         self.dirname = None
         self.img = None
+        self.mm = None
+        self.f = None
+        self.old = True
 
     def selectDirectory(self):
         dirname = QFileDialog.getExistingDirectory(self, 'Select directory', self.dirname)
@@ -592,23 +804,46 @@ class imageLoader(QWidget):
         self.dirBox.setText(dirname)
         metafile = dirname + r'\metaSpool.txt'
         if os.path.isfile(metafile):
+            if type(self.mm) is mmap.mmap:
+                self.mm.close()
+                self.f.close()
             self.dirname = dirname
             f = open(metafile, mode='r')
             metadata = f.readlines()
             f.close()
-            self.datfiles = glob(dirname + r"\*.dat")
-            self.filenum = len(self.datfiles)
-            self.fileNumBox.setText(str(self.filenum))
-            self.anlzStartBox.setMaximum(self.filenum-1)
-            self.anlzEndBox.setMaximum(self.filenum-1)
-            self.anlzEndBox.setValue(self.filenum-1)
-            self.imgSize = int(metadata[0])
-            self.encoding = metadata[1]
-            self.stride = int(metadata[2])
-            self.height = int(metadata[3])
-            self.width = int(metadata[4])
-            self.currentNumBox.setMaximum(self.filenum - 1)
-            self.update_img()
+            if len(metadata) != 7:
+                self.old = True
+                self.datfiles = glob(dirname + r"\*.dat")
+                self.filenum = len(self.datfiles)
+                self.fileNumBox.setText(str(self.filenum))
+                self.anlzStartBox.setMaximum(self.filenum-1)
+                self.anlzEndBox.setMaximum(self.filenum-1)
+                self.anlzEndBox.setValue(self.filenum-1)
+                self.imgSize = int(metadata[0])
+                self.encoding = metadata[1]
+                self.stride = int(metadata[2])
+                self.height = int(metadata[3])
+                self.width = int(metadata[4])
+                self.currentNumBox.setMaximum(self.filenum - 1)
+                self.update_img()
+            else:
+                self.old = False
+                self.datfiles = glob(dirname + r"\*.dat")
+                self.filenum = len(self.datfiles)
+                self.imgSize = int(metadata[0])
+                self.encoding = metadata[1]
+                self.stride = int(metadata[2])
+                self.height = int(metadata[3])
+                self.width = int(metadata[4])
+                self.frameNum = int(metadata[6])
+                self.fileNumBox.setText(str(self.frameNum))
+                self.anlzStartBox.setMaximum(self.frameNum-1)
+                self.anlzEndBox.setMaximum(self.frameNum-1)
+                self.anlzEndBox.setValue(self.frameNum-1)
+                self.currentNumBox.setMaximum(self.frameNum - 1)
+                self.f = open(dirname + "/spool.dat", mode="r+b")
+                self.mm = mmap.mmap(self.f.fileno(), 0)
+                self.update_img()
         else:
             logging.error('No metadata was found.\n')
 
@@ -630,24 +865,45 @@ class imageLoader(QWidget):
         image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
         window.central.ImgWidget.setImage(image)
 
-
     def update_img(self):
-        num = int(self.currentNumBox.text())
-        rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
-        buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-        outputBuffer = (ct.c_ushort * (self.width * self.height))()
-        outBuffer = (ct.c_ubyte*(self.width*self.height))()
-        max = ct.c_double()
-        min = ct.c_double()
-        ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
-        dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
+        if self.old:
+            num = int(self.currentNumBox.text())
+            rawdata = np.fromfile(self.datfiles[num], dtype=np.uint8)
+            buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+            outputBuffer = (ct.c_ushort * (self.width * self.height))()
+            outBuffer = (ct.c_ubyte*(self.width*self.height))()
+            max = ct.c_double()
+            min = ct.c_double()
+            ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
+            dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
                              ct.byref(max), ct.byref(min))
-        self.min = min.value
-        self.max = max.value
-        self.img = np.array(outBuffer).reshape(self.height, self.width)
-        self.imgMinBox.setText(str(self.min))
-        self.imgMaxBox.setText(str(self.max))
-        self.imgSignal.emit(self)
+            self.min = min.value
+            self.max = max.value
+            self.img = np.array(outBuffer).reshape(self.height, self.width)
+            self.imgMinBox.setText(str(self.min))
+            self.imgMaxBox.setText(str(self.max))
+            self.imgSignal.emit(self)
+        else:
+            num = int(self.currentNumBox.text())
+            self.mm.seek(self.imgSize*num)
+            rawdata = self.mm.read(self.imgSize)
+            buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+            outputBuffer = (ct.c_ushort * (self.width * self.height))()
+            outBuffer = (ct.c_ubyte*(self.width*self.height))()
+            max = ct.c_double()
+            min = ct.c_double()
+            ret = dll.convertBuffer(buffer, outputBuffer, self.width, self.height, self.stride)
+            dll.processImageShow(self.height, self.width, outputBuffer, self.prms, outBuffer,
+                                 ct.byref(max), ct.byref(min))
+            self.min = min.value
+            self.max = max.value
+            self.img = np.array(outBuffer).reshape(self.height, self.width)
+            if self.areaIsSelected:
+                for area in self.selectedAreas:
+                    self.img = cv2.rectangle(self.img, area[0], area[1], 127, 3)
+            self.imgMinBox.setText(str(self.min))
+            self.imgMaxBox.setText(str(self.max))
+            self.imgSignal.emit(self)
 
 
 class processWidget(QGroupBox):
@@ -687,6 +943,8 @@ class processWidget(QGroupBox):
 
         self.contButton = QRadioButton('Find Contours', self)
         self.contButton.setAutoExclusive(False)
+        self.areaSelectButton = QPushButton("Area Select")
+        self.areaSelectButton.setCheckable(True)
         self.contNum = QSpinBox(self)
         self.contNum.setRange(1,4)
 
@@ -695,6 +953,26 @@ class processWidget(QGroupBox):
         self.initLayout()
 
     def initLayout(self):
+        # gbox = QGridLayout()
+        # gbox.addWidget(self.normButton, 0, 0)
+        # gbox.addLayout(LHLayout("Min: ", self.normMin), 0, 1)
+        # gbox.addLayout(LHLayout("Max: ", self.normMax), 0, 2)
+        #
+        # gbox.addWidget(self.standButton, 0, 3)
+        # gbox.addLayout(LHLayout("Sigma: ", self.sigma), 0, 5)
+        #
+        # gbox.addWidget(self.blurButton, 1, 0)
+        # gbox.addLayout(LHLayout("Kernel size: ", self.blurSize), 1, 3)
+        # gbox.addLayout(LHLayout("Sigma: ", self.blurSigma), 1, 5)
+        #
+        # gbox.addWidget(self.thresButton, 2, 0)
+        # gbox.addLayout(LHLayout("Threshold: ", self.thresVal), 2, 2)
+        # gbox.addLayout(LHLayout("Type: ", self.thresType), 2, 4)
+        # gbox.addWidget(self.OtsuButton, 2, 5)
+        #
+        # gbox.addWidget(self.contButton, 3, 0)
+        # gbox.addLayout(LHLayout("Number to Find: ", self.contNum), 3, 3)
+
         hbox000 = QHBoxLayout()
         setListToLayout(hbox000, [self.normButton, LHLayout("Min: ", self.normMin),\
                                   LHLayout("Max: ", self.normMax)])
@@ -717,9 +995,12 @@ class processWidget(QGroupBox):
 
         hbox03 = QHBoxLayout()
         hbox03.addWidget(self.contButton)
+        hbox03.addWidget(self.areaSelectButton)
         hbox03.addLayout(LHLayout("Number to Find: ", self.contNum))
 
         vbox0 = QVBoxLayout(self)
+        # vbox0.addLayout(gbox)
+        # vbox0.addWidget(self.applyButton)
         setListToLayout(vbox0, [hbox00, hbox01, hbox02, hbox03, self.applyButton])
 
         # self.setStyleSheet("background-color:white;")
@@ -730,8 +1011,11 @@ class processWidget(QGroupBox):
         blurPrms(0,0,0,0),
         thresPrms(0,0,0,0),
         contPrms(0,0))
+        self.areaIsSelected = False
+        self.selectedAreas = []
 
     def set_prm(self):
+        self.areaIsSelected = self.areaSelectButton.isChecked()
         self.prmStruct.ns = nsPrms(self.normButton.isChecked(), self.normMax.value(), self.normMin.value(), self.sigma.value())
         self.prmStruct.blur = blurPrms(self.blurButton.isChecked(), self.blurSize.value(), self.blurSize.value(), self.blurSigma.value())
         self.prmStruct.thres = thresPrms(self.thresButton.isChecked(), self.thresVal.value(), 255, self.thresType.currentIndex()+int(self.OtsuButton.isChecked())*8)
@@ -768,9 +1052,20 @@ class SLM_Controller(QGroupBox):
         self.SLMDial.setWrapping(True)
         self.SLMDial.setMaximum(360)
         self.SLMDial.setMinimum(0)
+        self.SLMDial.setMinimumSize(150, 150)
 
         self.rotationBox.valueChanged[int].connect(self.SLMDial.setValue)
         self.SLMDial.valueChanged[int].connect(self.rotationBox.setValue)
+
+        self.tiltXBox = QDoubleSpinBox(self)
+        self.tiltYBox = QDoubleSpinBox(self)
+
+        self.tiltXBox.valueChanged.connect(self.tiltXChanged)
+        self.tiltYBox.valueChanged.connect(self.tiltYChanged)
+
+        for SpinBox in [self.tiltXBox, self.tiltYBox]:
+            SpinBox.setMinimum(-20.0)
+            SpinBox.setSingleStep(0.1)
 
         self.focusBox = QDoubleSpinBox(self)
         self.focusBox.setRange(-3.0, 3.0)
@@ -784,6 +1079,21 @@ class SLM_Controller(QGroupBox):
         self.focusYBox.setRange(-300, 300)
         self.focusXBox.valueChanged.connect(self.focusChanged)
         self.focusYBox.valueChanged.connect(self.focusChanged)
+
+        self.intModBox = QDoubleSpinBox(self)
+        self.intModBox.setMaximum(1.0)
+        self.intModBox.setMinimum(0.0)
+        self.intModBox.setDecimals(2)
+        self.intModBox.setSingleStep(0.1)
+        self.intModBox.valueChanged.connect(self.intensityModulationChanged)
+
+        self.alignmentToolButton = QPushButton("Alignment Tool", self)
+        self.alignmentToolButton.setCheckable(True)
+        self.alignmentToolButton.toggled.connect(self.switchMask)
+        # self.aspectBox = QDoubleSpinBox(self)
+        # self.aspectBox.setDecimals(3)
+        # self.aspectBox.setSingleStep(0.01)
+        # self.aspectBox.valueChanged.connect(self.aspectChanged)
 
         self.initLayout()
 
@@ -801,17 +1111,28 @@ class SLM_Controller(QGroupBox):
         hbox014.addWidget(self.focusXBox)
         hbox014.addWidget(self.focusYBox)
 
+        RotationGroup = QGroupBox("Rotation", self)
+        RotationLayout = QVBoxLayout()
+        RotationGroup.setLayout(RotationLayout)
+        RotationLayout.addWidget(self.SLMDial)
+        RotationLayout.addWidget(self.rotationBox)
         vbox00 = QVBoxLayout()
-        vbox00.addStretch()
-        setListToLayout(vbox00, [QLabel("Rotation"), self.SLMDial, self.rotationBox])
-        vbox00.addStretch()
+        vbox00.addWidget(RotationGroup)
+
+        TiltBox = QGroupBox("Tilt", self)
+        TiltLayout = QHBoxLayout()
+        TiltBox.setLayout(TiltLayout)
+        TiltLayout.addLayout(LHLayout("x:", self.tiltXBox))
+        TiltLayout.addLayout(LHLayout("y:", self.tiltYBox))
+        vbox00.addWidget(TiltBox)
 
         vbox01 = QVBoxLayout()
-        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014])
+        setListToLayout(vbox01, [hbox010, hbox011, hbox012, hbox013, hbox014, LHLayout("Intensity Modulation", self.intModBox), self.alignmentToolButton])
 
         hbox0 = QHBoxLayout(self)
-        hbox0.addLayout(vbox00)
         hbox0.addLayout(vbox01)
+        hbox0.addSpacing(20)
+        hbox0.addLayout(vbox00)
 
         self.setTitle("SLM Controller")
 
@@ -827,47 +1148,51 @@ class SLM_Controller(QGroupBox):
         self.focus = 0
         self.focusX = 396
         self.focusY = 300
+        self.tiltX = 0
+        self.tiltY = 0
+        self.mask = 0
+        self.intMod = 0.5
+        self.aspectRatio = 1.0
 
     def switch_SLM(self, checked):
         if checked:
-            desktop = app.desktop()
-            left = desktop.availableGeometry(1).left()
-            top = desktop.availableGeometry(1).top()
             self.focus = self.focusBox.value()
-            self.w.move(left, top)
             self.w.showFullScreen()
             self.make_base()
             self.init_img()
             self.w.update_SLM()
+            logging.debug((self.w.geometry()))
         else:
-            self.w.reject()
+            self.w.hide()
 
     def wavelengthChanged(self, index):
         self.correction = cv2.imread(self.correctImg[index], 0)
         self.alpha = self.alphaList[index]
 
     def make_base(self):
-        x = np.arange(792)
-        y = np.arange(600)
+        x = (np.arange(792)-self.focusX)*self.aspectRatio
+        y = np.arange(600)-self.focusY
         X, Y = np.meshgrid(x, y)
-        focusCorrection = ((X - self.focusX)**2 + (Y - self.focusY)**2)*self.focus*1e-2
-        self.base = self.correction + focusCorrection.astype(np.uint8)
+        focusCorrection = (X**2 + Y**2)*self.focus*1e-2
+        tiltCorrection = self.tiltX*X + self.tiltY*Y
+        self.base = (self.correction + tiltCorrection + focusCorrection + self.mask).astype(np.uint8)
 
     def init_img(self):
-        img = self.base.astype(np.float) * self.alpha / 256
+        img = self.base.astype(np.float) * self.alpha / 255
         self.w.img = img.astype(np.uint8)
 
     def update_img(self):
-        x = np.arange(792)
+        m = self.intMod
+        x = np.arange(792)*self.aspectRatio
         y = np.arange(600)
         X, Y = np.meshgrid(x, y)
 
         rotX = X*np.sin(self.theta) + Y*np.cos(self.theta)
         rotY = X*np.cos(self.theta) - Y*np.sin(self.theta)
 
-        img = ((rotX // self.pitch + rotY // self.pitch) % 2) * 128
+        img = (rotX // self.pitch % 2) * 128 * m + (rotY // self.pitch % 2) * 128 * (1 - m)
         img = (img + self.base).astype(np.uint8)
-        img = img.astype(np.float) * self.alpha / 256
+        img = img.astype(np.float) * self.alpha / 255
         self.w.img = img.astype(np.uint8)
         self.w.update_SLM()
 
@@ -878,17 +1203,54 @@ class SLM_Controller(QGroupBox):
             self.init_img()
             self.w.update_SLM()
 
+    def tiltXChanged(self, val):
+        self.tiltX = val
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    def tiltYChanged(self, val):
+        self.tiltY = val
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
     def focusChanged(self, val):
         self.focus = self.focusBox.value()
         self.focusX = self.focusXBox.value()+396
         self.focusY = self.focusYBox.value()+300
         self.make_base()
         if self.SLMButton.isChecked():
-            if self.modulateButton.isChecked():
-                self.update_img()
-            else:
-                self.init_img()
-                self.w.update_SLM()
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    def switchMask(self, checked):
+        if checked:
+            x = np.arange(792)
+            y = np.arange(600)
+            X, Y = np.meshgrid(x, y)
+            pitch = 1
+
+            img = ((X // pitch + Y // pitch) % 2) * 128
+            circle = (X-396)**2 + (Y-300)**2
+            thres = circle > 200**2
+            self.mask = thres*img.astype(np.uint8)
+        else:
+            self.mask = 0
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    def intensityModulationChanged(self, val):
+        self.intMod = val
+        self.make_base()
+        if self.SLMButton.isChecked():
+            self.modulate_SLM(self.modulateButton.isChecked())
+
+    # def aspectChanged(self, val):
+    #     self.aspectRatio = self.aspectBox.value()
+    #     self.make_base()
+    #     if self.SLMButton.isChecked():
+    #         self.modulate_SLM(self.modulateButton.isChecked())
 
 
 class DIOWidget(QGroupBox):
@@ -938,6 +1300,14 @@ class shutterWidget(QGroupBox):
 
         self.closeButton.setChecked(True)
         self.setTitle("Shutter Controller")
+
+    def change(self):
+        if self.openButton.isChecked():
+            self.closeButton.click()
+        else:
+            self.openButton.click()
+        QApplication.processEvents()
+
 
 class Logger(logging.Handler):
     def __init__(self, parent):
@@ -1035,23 +1405,37 @@ class SpecialMeasurementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        self.mode = 0
         self.start = 0
         self.end = 0
         self.step = 0
         self.num = 0
-        self.piezoCheck = False
+        self.tiltXY = 0
 
         self.repeat = 0
         self.repeatCheck = False
 
-        self.piezoCheckBox = QRadioButton("Piezo Measurement", self)
+        self.piezoCheckBox = QCheckBox("Piezo Measurement", self)
         self.startBox = QDoubleSpinBox(self)
         self.endBox = QDoubleSpinBox(self)
         self.stepBox = QDoubleSpinBox(self)
         self.stepBox.setDecimals(3)
         self.numBox = QSpinBox(self)
 
-        self.repeatCheckBox = QRadioButton("Repeated Measurement", self)
+        self.tiltCheckBox = QCheckBox("Tilt Measurement", self)
+        self.tiltStartBox = QDoubleSpinBox(self)
+        self.tiltStartBox.setMinimum(-10)
+        self.tiltStartBox.setMaximum(10)
+        self.tiltEndBox = QDoubleSpinBox(self)
+        self.tiltEndBox.setMinimum(-10)
+        self.tiltEndBox.setMaximum(10)
+        self.tiltStepBox = QDoubleSpinBox(self)
+        self.tiltStepBox.setDecimals(3)
+        self.tiltNumBox = QSpinBox(self)
+        self.tiltXYBox = QComboBox(self)
+        self.tiltXYBox.addItems(["X", "Y"])
+
+        self.repeatCheckBox = QCheckBox("Cycle Measurement", self)
         self.repeatBox = QSpinBox(self)
         self.repeatBox.setMinimum(1)
 
@@ -1066,27 +1450,236 @@ class SpecialMeasurementDialog(QDialog):
         hbox.addWidget(self.rejectButton)
 
         hbox2 = QHBoxLayout()
-        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um)", self.startBox),\
-                                LHLayout("End (um)", self.endBox), LHLayout("Step (um)", self.stepBox),\
-                                LHLayout("Number of each condition", self.numBox)])
+        setListToLayout(hbox2, [self.piezoCheckBox, LHLayout("Start (um):", self.startBox),\
+                                LHLayout("End (um):", self.endBox), LHLayout("Step (um):", self.stepBox),\
+                                LHLayout("Number of each condition:", self.numBox)])
+
+        hbox4 = QHBoxLayout()
+        setListToLayout(hbox4, [self.tiltCheckBox, LHLayout("Start :", self.tiltStartBox),\
+                                LHLayout("End :", self.tiltEndBox), LHLayout("Step :", self.tiltStepBox),\
+                                LHLayout("Number of each condition:", self.tiltNumBox), self.tiltXYBox])
 
         hbox3 = QHBoxLayout()
         hbox3.addWidget(self.repeatCheckBox)
-        hbox3.addLayout(LHLayout("Repetition", self.repeatBox))
+        hbox3.addLayout(LHLayout("Cycle:", self.repeatBox))
 
         vbox = QVBoxLayout(self)
-        setListToLayout(vbox, [hbox2, hbox3, hbox])
+        setListToLayout(vbox, [hbox2, hbox4, hbox3, hbox])
 
     def applySettings(self):
-        self.piezoCheck = self.piezoCheckBox.isChecked()
-        self.start = self.startBox.value()
-        self.end = self.endBox.value()
-        self.step = self.stepBox.value()
-        self.num = self.numBox.value()
+        if self.piezoCheckBox.isChecked():
+            self.mode = 1
+            self.start = self.startBox.value()
+            self.end = self.endBox.value()
+            self.step = self.stepBox.value()
+            self.num = self.numBox.value()
+        elif self.tiltCheckBox.isChecked():
+            self.mode = 2
+            self.start = self.tiltStartBox.value()
+            self.end = self.tiltEndBox.value()
+            self.step = self.tiltStepBox.value()
+            self.num = self.tiltNumBox.value()
+            self.tiltXY = self.tiltXYBox.currentIndex()
+        else:
+            self.mode=0
         self.repeatCheck = self.repeatCheckBox.isChecked()
         self.repeat = self.repeatBox.value()
-        return {"piezoCheck": self.piezoCheck, "start": self.start, "end": self.end,\
-                "step": self.step, "num": self.num, "repeatCheck": self.repeatCheck, "repeat": self.repeat}
+        return {"mode": self.mode, "start": self.start, "end": self.end,\
+                "step": self.step, "num": self.num, "tiltXY": self.tiltXY,\
+                "repeatCheck": self.repeatCheck, "repeat": self.repeat}
+
+
+class AreaSelectImgWidet(MyImageWidget):
+    pressSignal = QtCore.pyqtSignal(QtCore.QPoint)
+    releasedSignal = QtCore.pyqtSignal(QtCore.QPoint)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setMouseTracking(False)
+
+    def mousePressEvent(self, event):
+        self.pressSignal.emit(event.pos())
+
+    def mouseReleaseEvent(self, event):
+        self.releasedSignal.emit(event.pos())
+
+
+class AreaSelectDialog(QDialog):
+    def __init__(self, img, parent=None):
+        super().__init__(parent)
+
+        self.imgWidget = AreaSelectImgWidet(self)
+        self.imgHeight = img.shape[0]
+        self.imgWidth = img.shape[1]
+        self.start = None
+        self.end = None
+        self.rects= []
+
+        self.imgWidget.pressSignal.connect(self.mousePressed)
+        self.imgWidget.posSignal.connect(self.mouseMoved)
+        self.imgWidget.releasedSignal.connect(self.mouseReleased)
+
+        self.applyButton = QPushButton("Apply")
+        self.clearButton = QPushButton("Clear")
+        self.cancelButton = QPushButton("Cancel")
+
+        self.applyButton.clicked.connect(self.accept)
+        self.clearButton.clicked.connect(self.clearSelection)
+        self.cancelButton.clicked.connect(self.reject)
+
+        self.setInitImage(img)
+        self.initLayout()
+
+    def initLayout(self):
+        buttonLayout = QHBoxLayout()
+        buttonLayout.addWidget(self.applyButton)
+        buttonLayout.addWidget(self.clearButton)
+        buttonLayout.addWidget(self.cancelButton)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.imgWidget)
+        layout.addLayout(buttonLayout)
+
+    def setImage(self, img):
+        height, width, bpc = img.shape
+        bpl = bpc * width
+        image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
+        self.imgWidget.setImage(image)
+
+    def setInitImage(self, img):
+        scale_w = float(600) / float(self.imgWidth)
+        scale_h = float(600) / float(self.imgHeight)
+        scale = min([scale_w, scale_h])
+        if scale == 0:
+            scale = 1
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        height, width, bpc = img.shape
+        self.height, self.width, self.img = height, width, img
+        self.setImage(img)
+
+    def mousePressed(self, point):
+        self.start = (point.x(), point.y())
+
+    def mouseMoved(self, point):
+        self.end = (point.x(), point.y())
+        self.drawRectangles()
+
+    def mouseReleased(self, point):
+        self.end = (point.x(), point.y())
+        length = max(abs(self.start[0]-self.end[0]), abs(self.start[1]-self.end[1]))
+        if length > 0:
+            LT = (self.start[0]-length, self.start[1]-length)
+            RB = (self.start[0]+length, self.start[1]+length)
+            self.rects.append((LT, RB))
+        self.start, self.end = None, None
+        self.drawRectangles()
+
+    def drawRectangles(self):
+        img = self.img.copy()
+        for rect in self.rects:
+            img = cv2.rectangle(img, rect[0], rect[1], (0,255,0), 3)
+        if self.start and self.end:
+            length = max(abs(self.start[0]-self.end[0]), abs(self.start[1]-self.end[1]))
+            LT = (self.start[0]-length, self.start[1]-length)
+            RB = (self.start[0]+length, self.start[1]+length)
+            img = cv2.rectangle(img, LT, RB, (0,255,0), 3)
+        self.setImage(img)
+
+    def applyAreas(self):
+        ret = []
+        for rect in self.rects:
+            LTx, LTy = min(rect[0][0], rect[1][0]), min(rect[0][1], rect[1][1])
+            RBx, RBy = max(rect[0][0], rect[1][0]), max(rect[0][1], rect[1][1])
+            LT = (int(LTx*self.imgWidth/self.width), int(LTy*self.imgHeight/self.height))
+            RB = (int(RBx*self.imgWidth/self.width), int(RBy*self.imgHeight/self.height))
+            RB = (RB[0], LT[1]+RB[0]-LT[0])
+            ret.append((LT, RB))
+        return ret
+
+    def clearSelection(self):
+        self.rects = []
+        self.drawRectangles()
+
+
+class GaussFitDialog(QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.rawImageWidet = MyImageWidget(self)
+        self.fittedImageWidget = MyImageWidget(self)
+        self.prmsTable = QTableWidget(1,8,self)
+        self.prmsTable.setHorizontalHeaderLabels(["Area", "Amp.", "Cx", "Cy", "Sx", "Sy", "Background", "delta"])
+        self.leftButton = QToolButton()
+        self.leftButton.setArrowType(Qt.LeftArrow)
+        self.rightButton = QToolButton()
+        self.rightButton.setArrowType(Qt.RightArrow)
+        self.leftButton.clicked.connect(lambda: self.changeCurrent(-1))
+        self.rightButton.clicked.connect(lambda: self.changeCurrent(1))
+        self.acceptButton = QPushButton("Proceed")
+        self.rejectButton = QPushButton("Cancel")
+        self.acceptButton.clicked.connect(self.accept)
+        self.rejectButton.clicked.connect(self.reject)
+
+        imgLayout = QHBoxLayout()
+        imgLayout.addWidget(self.leftButton)
+        imgLayout.addWidget(self.rawImageWidet)
+        imgLayout.addWidget(self.fittedImageWidget)
+        imgLayout.addWidget(self.rightButton)
+
+        bottomLayout = QHBoxLayout()
+        bottomLayout.addWidget(self.acceptButton)
+        bottomLayout.addWidget(self.rejectButton)
+
+        mainLayout = QVBoxLayout(self)
+        mainLayout.addLayout(imgLayout)
+        mainLayout.addWidget(self.prmsTable)
+        mainLayout.addLayout(bottomLayout)
+
+        self.results = []
+        self.current = 0
+
+    def setResults(self):
+        num = len(self.results)
+        self.prmsTable.clearContents()
+        self.prmsTable.setRowCount(1)
+        for result, i in zip(self.results, range(num)):
+            for val, j in zip(result[2], range(len(result[2]))):
+                item = QTableWidgetItem(f"{val:.5g}")
+                self.prmsTable.setItem(i, j, item)
+            self.prmsTable.insertRow(i+1)
+
+    def resizeImage(self, img):
+        img_height, img_width = img.shape
+        scale_w = float(396) / float(img_width)
+        scale_h = float(396) / float(img_height)
+        scale = min([scale_w, scale_h])
+
+        if scale == 0:
+            scale = 1
+
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        img = cv2.convertScaleAbs(img, alpha=1/16)
+        img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2RGB)
+        height, width, bpc = img.shape
+        bpl = bpc * width
+        image = QtGui.QImage(img.data, width, height, bpl, QtGui.QImage.Format_RGB888)
+        return image
+
+    def showResults(self, num):
+        self.current = num
+        number = len(self.results)
+        result = self.results[num]
+        rawImg = self.resizeImage(result[0])
+        fittedImg = self.resizeImage(result[1])
+        self.rawImageWidet.setImage(rawImg)
+        self.fittedImageWidget.setImage(fittedImg)
+        self.leftButton.setEnabled(num > 0)
+        self.rightButton.setEnabled(num < number-1)
+
+    def changeCurrent(self, drct):
+        self.current += drct
+        self.showResults(self.current)
 
 
 class centralWidget(QWidget):
@@ -1113,6 +1706,7 @@ class centralWidget(QWidget):
         self.modeTab.addTab(self.imageLoader, 'Image Load')
 
         self.specialDialog = SpecialMeasurementDialog()
+        self.gaussFitDialog = GaussFitDialog()
 
         self.initSignal()
         self.initUI()
@@ -1121,15 +1715,17 @@ class centralWidget(QWidget):
     def initSignal(self):
         self.imageAcquirer.imgSignal.connect(self.update_frame)
         self.imageAcquirer.posSignal.connect(self.applyCenter)
-        # self.imageAcquirer.finished.connect(self.acquisitionFinished)
-
         self.imagePlayer.countStepSignal.connect(self.imageLoader.currentNumBox.stepUp)
+        self.imageProcessor.prgrsSignal.connect(self.setAnalysisProgress)
+
         self.imageLoader.anlzButton.clicked.connect(self.analyzeDatas)
         self.imageLoader.imgSignal.connect(self.update_frame)
+        self.imageLoader.gaussFitButton.toggled.connect(self.gaussFitData)
 
         self.ImgWidget.imageWidget.posSignal.connect(self.writeMousePosition)
 
         self.processWidget.applyButton.clicked.connect(self.applyProcessClicked)
+        self.processWidget.areaSelectButton.toggled.connect(self.selectArea)
 
         self.DIOWidget.DIObuttons.buttonClicked[int].connect(self.writeDIO)
 
@@ -1192,13 +1788,14 @@ class centralWidget(QWidget):
         self.MarkerY = 0
         self.imgHeight = 600
         self.imgWidth = 600
-        self.markerPos = [400, 300]
+        self.markerPos = [396, 300]
         self.dst = [0,0,0,0]
         self.split = False
         self.Handle = ct.c_int()
         self.ref = ct.c_int()
         self.CentralPos = None
         self.outDIO = [0, 0, 0, 0, 0, 0]
+        self.stopDll = ct.c_bool(False)
         self.fin = True
 
         self.openSettings()
@@ -1217,7 +1814,7 @@ class centralWidget(QWidget):
         dll.GetFloatMin(self.Handle, "Exposure Time", ct.byref(minExposeTime))
         self.acquisitionWidget.exposeTBox.setRange(minExposeTime.value, maxExposeTime.value)
         logging.info('Minimum exp. time: {}'.format(minExposeTime.value))
-        logging.info('Successfully initializied')
+        logging.info('Successfully connected')
         self.acquisitionWidget.initButton.setEnabled(False)
         self.acquisitionWidget.applyButton.setEnabled(True)
         self.acquisitionWidget.finButton.setEnabled(True)
@@ -1228,7 +1825,7 @@ class centralWidget(QWidget):
 
     def finalizeCamera(self):
         dll.fin(self.Handle)
-        logging.info('Successfully finalized\n')
+        logging.info('Successfully Disconnected')
         self.acquisitionWidget.finButton.setEnabled(False)
         self.acquisitionWidget.runButton.setEnabled(False)
         self.acquisitionWidget.applyButton.setEnabled(False)
@@ -1267,7 +1864,9 @@ class centralWidget(QWidget):
 
     def calcDst(self):
         size = max([self.acquisitionWidget.AOIWidth, self.acquisitionWidget.AOIHeight])
-        vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
+        # vec = np.array([np.cos(self.SLM_Controller.theta+np.pi/4), np.sin(self.SLM_Controller.theta+np.pi/4)])\
+        # *self.MarkerFactor*600/size/self.SLM_Controller.pitch
+        vec = np.array([np.cos(self.SLM_Controller.theta), np.sin(self.SLM_Controller.theta)])\
         *self.MarkerFactor*600/size/self.SLM_Controller.pitch
         markerPos = np.array([self.imgWidth/2+self.MarkerX, self.imgHeight/2+self.MarkerY])
         self.markerPos = markerPos.astype(np.uint16).tolist()
@@ -1278,7 +1877,6 @@ class centralWidget(QWidget):
             self.dst[n] = dst.astype(np.uint16).tolist()
 
     def update_frame(self, source):
-
         img_height = source.height
         img_width = source.width
         img = source.img
@@ -1311,6 +1909,33 @@ class centralWidget(QWidget):
             else:
                 self.acquisitionWidget.fixedWidget.specialButton.setChecked(False)
 
+    def repeatAcquisition(self, count, count_p):
+        mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
+        repeat = self.specialPrms["repeat"]
+        self.shutterWidget.closeButton.click()
+        QApplication.processEvents()
+        logging.info('Acquisition start')
+        for i in range(repeat*2):
+            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText("Measurement "+str(i%2+1)+" / Cycle "+str(i//2+1))
+            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
+                                     num=ct.c_int(num), count_p=count_p)
+            self.imageAcquirer.start()
+            ref = count.value
+            while not self.imageAcquirer.stopped:
+                if count.value > (ref + 5):
+                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
+                    QApplication.processEvents()
+                    ref = count.value
+            count = ct.c_int(0)
+            count_p = ct.pointer(count)
+            self.shutterWidget.change()
+            waitTime = time.time()
+            while True:
+                now = time.time()
+                if (now - 3) > waitTime:
+                    break
+
     def startAcquisition(self, checked):
         if checked:
             count = ct.c_int(0)
@@ -1324,19 +1949,30 @@ class centralWidget(QWidget):
                 self.acquisitionWidget.runButton.setText("STOP")
                 self.imageAcquirer.start()
 
-            elif self.acquisitionWidget.Tab.currentIndex() == 1:
+            else:
+                if self.acquisitionWidget.fixedWidget.commentButton.isChecked():
+                    mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
+                    with open(mainDir+"log.txt", "w") as f:
+                        f.write(self.acquisitionWidget.fixedWidget.comment)
                 if self.acquisitionWidget.fixedWidget.specialButton.isChecked():
-                    if self.specialPrms["piezoCheck"]:
+                    if self.specialPrms["mode"] == 1:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
                         num = self.specialPrms["num"]
                         logging.info('Acquisition start')
                         positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        waitTime = time.time()
+                        while True:
+                            now = time.time()
+                            if (now - 300) > waitTime:
+                                break
                         for pos in positions:
+                            if not self.acquisitionWidget.runButton.isChecked():
+                                break
                             dll.movePiezo(self.piezoWidget.piezoID, pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
-                                if (now - 3) > waitTime:
+                                if (now - 60) > waitTime:
                                     break
                             self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(pos))
                             self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
@@ -1352,31 +1988,27 @@ class centralWidget(QWidget):
                             count_p = ct.pointer(count)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
-                    elif self.specialPrms["repeatCheck"]:
+                    elif self.specialPrms["mode"] == 2:
                         mainDir = self.acquisitionWidget.fixedWidget.dirname.encode(encoding='utf_8')
-                        num = int(self.acquisitionWidget.fixedWidget.numImgBox.text())
-                        repeat = self.specialPrms["repeat"]
-                        self.writeDIO(2)
+                        num = self.specialPrms["num"]
                         logging.info('Acquisition start')
-                        for i in range(repeat*2):
-                            self.acquisitionWidget.fixedWidget.currentRepeatBox.setText(str(i%2)+" of "+str(i//2))
-                            self.imageAcquirer.setup(self.Handle, dir=ct.c_char_p(mainDir),
-                                                     num=ct.c_int(num), count_p=count_p)
-                            self.imageAcquirer.start()
-                            ref = count.value
-                            while not self.imageAcquirer.stopped:
-                                if count.value > (ref + 5):
-                                    self.acquisitionWidget.fixedWidget.countBox.setText(str(count.value))
-                                    QApplication.processEvents()
-                                    ref = count.value
-                            count = ct.c_int(0)
-                            count_p = ct.pointer(count)
-                            self.writeDIO(3-i%2)
+                        positions = np.arange(self.specialPrms["start"], self.specialPrms["end"], self.specialPrms["step"])
+                        XY = self.specialPrms["tiltXY"]
+                        for pos in positions:
+                            if XY == 0:
+                                self.SLM_Controller.tiltXChanged(pos)
+                            else:
+                                self.SLM_Controller.tiltYChanged(pos)
                             waitTime = time.time()
                             while True:
                                 now = time.time()
                                 if (now - 3) > waitTime:
                                     break
+                            self.repeatAcquisition(count, count_p)
+                        self.acquisitionWidget.runButton.setChecked(False)
+                        logging.info('Acquisition stopped')
+                    elif self.specialPrms["repeatCheck"]:
+                        self.repeatAcquisition(count, count_p)
                         self.acquisitionWidget.runButton.setChecked(False)
                         logging.info('Acquisition stopped')
                 else:
@@ -1406,17 +2038,8 @@ class centralWidget(QWidget):
                                                  DIOhandle=self.DIOhandle, mode=2)
                         self.applyProcessSettings()
                         self.imageAcquirer.start()
-            # else:
-            #     if self.imageLoader.dirname:
-            #         self.applyProcessSettings()
-            #         self.imagePlayer.setup()
-            #         self.acquisitionWidget.runButton.setText('STOP')
-            #         self.imagePlayer.run()
-            #     else:
-            #         logging.error('No directory selected!')
-            #         self.acquisitionWidget.runButton.setChecked(False)
-
         else:
+            self.imageAcquirer.stopDll.value = True
             self.imageAcquirer.stopped = True
             self.imagePlayer.stopped = True
             self.acquisitionWidget.runButton.setText("RUN")
@@ -1427,12 +2050,12 @@ class centralWidget(QWidget):
     def applyCenter(self, posX, posY):
         self.CentralPos = (posX, posY)
         self.acquisitionWidget.runButton.setChecked(False)
-        self.acquisitionWidget.fixedWidget.cntrPosLabel.setText("Center of position: ({:.2f}, {:.2f})".format(self.CentralPos[0], self.CentralPos[1]))
+        self.acquisitionWidget.fixedWidget.cntrPosBox.setText("{:.2f}, {:.2f}".format(self.CentralPos[0], self.CentralPos[1]))
 
     def setAOICenter(self):
-        centerX = self.acquisitionWidget.CenterXBox.value()
-        centerY = self.acquisitionWidget.CenterYBox.value()
-        AOISizeIndex = self.acquisitionWidget.AOISizeBox.currentIndex()
+        centerX = self.acquisitionWidget.AOI.CenterXBox.value()
+        centerY = self.acquisitionWidget.AOI.CenterYBox.value()
+        AOISizeIndex = self.acquisitionWidget.AOI.AOISizeBox.currentIndex()
         AOISize = 2048/2**AOISizeIndex
         if dll.SetInt(self.Handle, "AOIWidth", int(AOISize)):
             logging.error("AOIWidth")
@@ -1446,29 +2069,31 @@ class centralWidget(QWidget):
     def applySettings(self):
         dll.SetFloat(self.Handle, "Exposure Time", self.acquisitionWidget.exposeTBox.value())
         dll.SetEnumString(self.Handle, "AOIBinning", self.acquisitionWidget.AOIBinBox.currentText())
-        index = self.acquisitionWidget.AOISizeBox.currentIndex()
-        if index == 5:
-            if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOIWidthBox.value()):
-                logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOILeftBox.value()):
-                logging.error("AOILeft")
-            if dll.SetInt(self.Handle, "AOIHeight", self.acquisitionWidget.AOIHeightBox.value()):
-                logging.error("AOIHeight")
-            if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOITopBox.value()):
-                logging.error("AOITop")
-        elif index == 0:
-            if dll.SetInt(self.Handle, "AOIWidth", 2048):
-                logging.error("AOIWidth")
-            if dll.SetInt(self.Handle, "AOIHeight", 2048):
-                logging.error("AOIHeight")
+        isDefault = self.acquisitionWidget.AOI.defaultCheck.isChecked()
+        if isDefault:
+            index = self.acquisitionWidget.AOI.AOISizeBox.currentIndex()
+            val = 2048/(2**index)
+            self.acquisitionWidget.AOIWidth = val
+            self.acquisitionWidget.AOIHeight = val
+            if index == 0:
+                if dll.SetInt(self.Handle, "AOIWidth", 2048):
+                    logging.error("AOIWidth")
+                if dll.SetInt(self.Handle, "AOIHeight", 2048):
+                    logging.error("AOIHeight")
+            else:
+                self.setAOICenter()
         else:
-            self.setAOICenter()
-        # else:
-        #     if dll.SetInt(self.Handle, "AOIWidth", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
-        #         logging.error("AOIWidth")
-        #     if dll.SetInt(self.Handle, "AOIHeight", int(2048/(2**self.acquisitionWidget.AOISizeBox.currentIndex()))):
-        #         logging.error("AOIHeight")
-        #     dll.centreAOI(self.Handle)
+            self.acquisitionWidget.AOIWidth = self.acquisitionWidget.AOI.AOIWidthBox.value()
+            self.acquisitionWidget.AOIHeight = self.acquisitionWidget.AOI.AOIHeightBox.value()
+            if dll.SetInt(self.Handle, "AOIWidth", self.acquisitionWidget.AOI.AOIWidthBox.value()):
+                logging.error("AOIWidth")
+            if dll.SetInt(self.Handle, "AOILeft", self.acquisitionWidget.AOI.AOILeftBox.value()):
+                logging.error("AOILeft")
+            if dll.SetInt(self.Handle, "AOIHeight", self.acquisitionWidget.AOI.AOIHeightBox.value()):
+                logging.error("AOIHeight")
+            if dll.SetInt(self.Handle, "AOITop", self.acquisitionWidget.AOI.AOITopBox.value()):
+                logging.error("AOITop")
+
         dll.SetBool(self.Handle, "RollingShutterGlobalClear", self.acquisitionWidget.globalClearButton.isChecked())
 
         frameRate = ct.c_double(float(self.acquisitionWidget.fixedWidget.frameRateBox.text()))
@@ -1492,7 +2117,11 @@ class centralWidget(QWidget):
     def applyProcessSettings(self, update=False):
         self.processWidget.set_prm()
         self.imageAcquirer.prms = self.processWidget.prmStruct
+        self.imageAcquirer.areaIsSelected = self.processWidget.areaIsSelected
+        self.imageAcquirer.selectedAreas = self.processWidget.selectedAreas
         self.imageLoader.prms = self.processWidget.prmStruct
+        self.imageLoader.areaIsSelected = self.processWidget.areaIsSelected
+        self.imageLoader.selectedAreas = self.processWidget.selectedAreas
         if update:
             self.imageLoader.update_img()
 
@@ -1518,45 +2147,133 @@ class centralWidget(QWidget):
         out = int(strings, 2)
         dll.writeDIO(self.DIOhandle, ct.c_ubyte(out))
 
+    def gaussFitData(self, checked):
+        if checked:
+            width, height, stride = self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride
+            ImgArry = (ct.c_ushort * (width * height))()
+            prmsList = []
+            datfile, imgSize = self.imageLoader.dirname+"/spool.dat", self.imageLoader.imgSize
+            mm = self.imageLoader.mm
+            mm.seek(imgSize*0)
+            rawdata = mm.read(imgSize)
+            buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+            ret = dll.convertBuffer(buffer, ImgArry, width, height, stride)
+            imgNpArray = np.array(ImgArry).reshape(width, height)
+            areaResults = []
+            for area, i  in zip(self.imageLoader.selectedAreas, range(len(self.imageLoader.selectedAreas))):
+                LT, RB = area
+                areaWidth = RB[0] - LT[0]
+                areaHeight = RB[1] - LT[1]
+                areaImg = imgNpArray[LT[1]:RB[1], LT[0]:RB[0]]
+                gaussfit = gf.GaussFit(areaImg)
+                try:
+                    fitted, prms, cov = gaussfit.fit()
+                except RuntimeError:
+                    logging.warning("fitting failed at area "+str(i))
+                else:
+                    prms = np.insert(prms, 0, i)
+                    delta = (prms[4]-prms[5])/(prms[4]+prms[5])
+                    prms = np.append(prms, delta)
+                    areaResults.append([areaImg, fitted, prms, cov])
+            if areaResults:
+                self.gaussFitDialog.results = areaResults
+                self.gaussFitDialog.setResults()
+                self.gaussFitDialog.showResults(0)
+                if not self.gaussFitDialog.exec_():
+                    self.imageLoader.gaussFitButton.setChecked(False)
+            else:
+                self.imageLoader.gaussFitButton.setChecked(False)
+                logging.warning("No results to show")
+
+    def setAnalysisProgress(self, progress):
+        self.imageLoader.progressBar.setValue(progress)
+
     def analyzeDatas(self):
         self.applyProcessSettings()
         logging.info("applySettings")
         start = self.imageLoader.anlzStartBox.value()
         end = self.imageLoader.anlzEndBox.value()
-        processfiles = []
-        for i in range(start, end):
-            processfiles.append(self.imageLoader.datfiles[i])
-        logging.info("setup")
-        self.imageProcessor.setup(processfiles, self.imageLoader.width,
-                                  self.imageLoader.height, self.imageLoader.stride,
-                                  self.processWidget.prmStruct, self.imageLoader.dirname, self.imageLoader.progressBar)
-        self.imageProcessor.run()
+        if self.imageLoader.old:
+            processfiles = []
+            for i in range(start, end):
+                processfiles.append(self.imageLoader.datfiles[i])
+            logging.info("setup")
+            self.imageProcessor.setup(processfiles, self.imageLoader.width,
+                                      self.imageLoader.height, self.imageLoader.stride,
+                                      self.processWidget.prmStruct, self.processWidget.areaIsSelected, self.processWidget.selectedAreas,
+                                      self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old)
+            self.imageProcessor.run()
+        else:
+            if self.imageLoader.anlzCheck.isChecked():
+                filterText = self.imageLoader.anlzFilter.text()
+                filterDirs = glob(filterText)
+                for dir in filterDirs:
+                    datFile = dir +"/spool.dat"
+                    with open(datFile, mode="r+b") as f:
+                        with mmap.mmap(f.fileno(), 0) as mm:
+                            processData = (datFile, start, end, self.imageLoader.imgSize)
+                            logging.info("setup")
+                            self.imageProcessor.setup(processData, self.imageLoader.width,
+                                                      self.imageLoader.height, self.imageLoader.stride,
+                                                      self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                                      dir, self.imageLoader.progressBar, self.imageLoader.old, mm)
+                            self.imageProcessor.run()
+                            while not self.imageProcessor.stopped:
+                                pass
+
+            else:
+                datFile = self.imageLoader.dirname +"/spool.dat"
+                processData = (datFile, start, end, self.imageLoader.imgSize)
+                logging.info("setup")
+                self.imageProcessor.setup(processData, self.imageLoader.width,
+                                          self.imageLoader.height, self.imageLoader.stride,
+                                          self.processWidget.prmStruct, self.imageLoader.gaussFitButton.isChecked(), self.processWidget.selectedAreas,
+                                          self.imageLoader.dirname, self.imageLoader.progressBar, self.imageLoader.old, self.imageLoader.mm)
+                self.imageProcessor.run()
 
     def exportBMP(self):
         fileToSave = QFileDialog.getSaveFileName(self, 'File to save', filter="Images (*.png *.bmp *.jpg)")
         logging.info("Save picture: "+fileToSave[0])
-        if fileToSave:
-            cv2.imwrite(fileToSave[0], self.imageLoader.img)
+        if fileToSave[0]:
+            if self.modeTab.currentIndex() == 0:
+                img = self.imageAcquirer.img
+            else:
+                img = self.imageLoader.img
+            cv2.imwrite(fileToSave[0], img)
 
     def exportSeries(self):
         dirToSave = QFileDialog.getExistingDirectory(self, 'Select directory')
-        logging.debug(dirToSave)
         if dirToSave:
             start = self.imageLoader.anlzStartBox.value()
             end = self.imageLoader.anlzEndBox.value()
-            for i in range(start, end):
-                rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
-                buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
-                outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+            if self.imageLoader.old:
+                for i in range(start, end):
+                    rawdata = np.fromfile(self.imageLoader.datfiles[i], dtype=np.uint8)
+                    buffer = rawdata.ctypes.data_as(ct.POINTER(ct.c_ubyte))
+                    outputBuffer = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
+                    outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
+                    max = ct.c_double()
+                    min = ct.c_double()
+                    ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                    dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
+                                         ct.byref(max), ct.byref(min))
+                    img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                    cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
+            else:
+                ImgArry = (ct.c_ushort * (self.imageLoader.width * self.imageLoader.height))()
                 outBuffer = (ct.c_ubyte*(self.imageLoader.width*self.imageLoader.height))()
-                max = ct.c_double()
-                min = ct.c_double()
-                ret = dll.convertBuffer(buffer, outputBuffer, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
-                dll.processImageShow(self.imageLoader.height, self.imageLoader.width, outputBuffer, self.imageLoader.prms, outBuffer,
-                                     ct.byref(max), ct.byref(min))
-                img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
-                cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
-
+                num = end - start
+                self.imageLoader.mm.seek(self.imageLoader.imgSize*start)
+                for i in range(num):
+                    rawdata = self.imageLoader.mm.read(int(self.imageLoader.imgSize))
+                    buffer = ct.cast(rawdata, ct.POINTER(ct.c_ubyte))
+                    max = ct.c_double()
+                    min = ct.c_double()
+                    ret = dll.convertBuffer(buffer, ImgArry, self.imageLoader.width, self.imageLoader.height, self.imageLoader.stride)
+                    dll.processImageShow(self.imageLoader.height, self.imageLoader.width, ImgArry, self.imageLoader.prms, outBuffer,
+                                         ct.byref(max), ct.byref(min))
+                    img = np.array(outBuffer).reshape(self.imageLoader.height, self.imageLoader.width)
+                    cv2.imwrite(dirToSave+"/"+str(i)+".bmp", img)
 
     def openSettings(self):
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1574,12 +2291,12 @@ class centralWidget(QWidget):
         self.processWidget.contButton.setChecked(settings.value('cont', type=bool))
         self.processWidget.contNum.setValue(settings.value('cont num', type=int))
         self.acquisitionWidget.exposeTBox.setValue(settings.value('exposure time', 0.01, type=float))
-        self.acquisitionWidget.AOILeftBox.setValue(settings.value('AOI left', type=int))
-        self.acquisitionWidget.AOITopBox.setValue(settings.value('AOI top', type=int))
-        self.acquisitionWidget.AOIWidthBox.setValue(settings.value('AOI width', type=int))
-        self.acquisitionWidget.AOIHeightBox.setValue(settings.value('AOI height', type=int))
-        self.acquisitionWidget.CenterXBox.setValue(settings.value('Center X', type=int))
-        self.acquisitionWidget.CenterYBox.setValue(settings.value('Center Y', type=int))
+        self.acquisitionWidget.AOI.AOILeftBox.setValue(settings.value('AOI left', type=int))
+        self.acquisitionWidget.AOI.AOITopBox.setValue(settings.value('AOI top', type=int))
+        self.acquisitionWidget.AOI.AOIWidthBox.setValue(settings.value('AOI width', type=int))
+        self.acquisitionWidget.AOI.AOIHeightBox.setValue(settings.value('AOI height', type=int))
+        self.acquisitionWidget.AOI.CenterXBox.setValue(settings.value('Center X', type=int))
+        self.acquisitionWidget.AOI.CenterYBox.setValue(settings.value('Center Y', type=int))
         self.acquisitionWidget.fixedWidget.thresBox.setValue(settings.value('DIO threshold', type=float))
         self.acquisitionWidget.contWidget.markerFactorBox.setValue(settings.value('marker factor', 100, type=float))
         self.imageLoader.dirname = settings.value('dir image', '')
@@ -1588,6 +2305,8 @@ class centralWidget(QWidget):
         self.SLM_Controller.focusBox.setValue(settings.value('SLM focus', 0, type=float))
         self.SLM_Controller.focusXBox.setValue(settings.value('SLM focusX', 0, type=int))
         self.SLM_Controller.focusYBox.setValue(settings.value('SLM focusY', 0, type=int))
+        self.SLM_Controller.intModBox.setValue(settings.value('SLM int mod', 0.5, type=float))
+        # self.SLM_Controller.aspectBox.setValue(settings.value('SLM aspect', 1, type=float))
 
     def writeSettings(self):  # Save current settings
         self.settings = QSettings('setting.ini', 'Andor_GUI')
@@ -1603,12 +2322,12 @@ class centralWidget(QWidget):
         self.settings.setValue('cont', self.processWidget.contButton.isChecked())
         self.settings.setValue('cont num', self.processWidget.contNum.value())
         self.settings.setValue('exposure time', self.acquisitionWidget.exposeTBox.value())
-        self.settings.setValue('AOI left', self.acquisitionWidget.AOILeftBox.value())
-        self.settings.setValue('AOI top', self.acquisitionWidget.AOITopBox.value())
-        self.settings.setValue('AOI width', self.acquisitionWidget.AOIWidthBox.value())
-        self.settings.setValue('AOI height', self.acquisitionWidget.AOIHeightBox.value())
-        self.settings.setValue('Center X', self.acquisitionWidget.CenterXBox.value())
-        self.settings.setValue('Center Y', self.acquisitionWidget.CenterYBox.value())
+        self.settings.setValue('AOI left', self.acquisitionWidget.AOI.AOILeftBox.value())
+        self.settings.setValue('AOI top', self.acquisitionWidget.AOI.AOITopBox.value())
+        self.settings.setValue('AOI width', self.acquisitionWidget.AOI.AOIWidthBox.value())
+        self.settings.setValue('AOI height', self.acquisitionWidget.AOI.AOIHeightBox.value())
+        self.settings.setValue('Center X', self.acquisitionWidget.AOI.CenterXBox.value())
+        self.settings.setValue('Center Y', self.acquisitionWidget.AOI.CenterYBox.value())
         self.settings.setValue('DIO threshold', self.acquisitionWidget.fixedWidget.thresBox.value())
         self.settings.setValue('marker factor', self.acquisitionWidget.contWidget.markerFactorBox.value())
         self.settings.setValue('dir image', self.imageLoader.dirname)
@@ -1617,6 +2336,8 @@ class centralWidget(QWidget):
         self.settings.setValue('SLM focus', self.SLM_Controller.focusBox.value())
         self.settings.setValue('SLM focusX', self.SLM_Controller.focusXBox.value())
         self.settings.setValue('SLM focusY', self.SLM_Controller.focusYBox.value())
+        self.settings.setValue('SLM int mod', self.SLM_Controller.intModBox.value())
+        # self.settings.setValue('SLM aspect', self.SLM_Controller.aspectBox.value())
 
     def showTemperature(self):
         temp = ct.c_double()
@@ -1632,14 +2353,22 @@ class centralWidget(QWidget):
     def sensorCooling(self, isChecked):
         dll.SetBool(self.Handle, "SensorCooling", isChecked)
 
-    def testPiezo(self):
-        ID = dll.initPiezo()
-        dll.setPiezoServo(ID, ct.c_int(True))
-        pos = ct.c_double()
-        uni = np.random.uniform()
-        dll.testPiezo(ID, ct.c_double(6.0+uni), ct.byref(pos))
-        logging.debug("pos: " + str(pos.value))
-        dll.finPiezo(ID)
+    def selectArea(self, checked):
+        if checked:
+            try:
+                if self.modeTab.currentIndex() == 0:
+                    img = self.imageAcquirer.img
+                else:
+                    img = self.imageLoader.img
+                self.areaDialog = AreaSelectDialog(img)
+                if self.areaDialog.exec_():
+                    self.processWidget.selectedAreas = self.areaDialog.applyAreas()
+                else:
+                    self.processWidget.areaSelectButton.setChecked(False)
+            except AttributeError:
+                self.processWidget.areaSelectButton.setChecked(False)
+                logging.error("No Image to draw for select areas")
+
 
 class mainWindow(QMainWindow):
 
@@ -1664,14 +2393,14 @@ class mainWindow(QMainWindow):
         fileMenu.addAction(expSAct)
         fileMenu.addAction(exitAct)
 
-        # self.setGeometry(100, 100, 1200, 800)
         self.setWindowTitle('Andor_CMOS')
+        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint | Qt.WindowMaximizeButtonHint)
 
         self.show()
 
     def closeEvent(self, event):
         if not self.central.fin:
-                self.central.finalizeCamera()
+            self.central.finalizeCamera()
         self.central.writeSettings()
         dll.FinaliseLibrary()
         dll.FinaliseUtilityLibrary()
