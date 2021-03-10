@@ -326,7 +326,10 @@ class ImageProcessor(QtCore.QThread):
                             err = np.sqrt(np.diag(cov))
                             prmList += list(err)
                             prmsList.append(prmList)
-                    self.prgrsSignal.emit(i)
+                    if i == num - 1:
+                        self.prgrsSignal.emit(i)
+                    elif i % (num//100) == 0:
+                        self.prgrsSignal.emit(i)
                 else:
                     if self.selectedAreas:
                         imgNpArray = np.array(ImgArry).reshape(self.width, self.height)
@@ -342,12 +345,18 @@ class ImageProcessor(QtCore.QThread):
                             point = (ct.c_float*2)()
                             dll.processImage(point, height, width, areaImgC_pt, self.prms)
                             pointlst.append([point[0]+LT[0], point[1]+LT[1]])
-                        self.prgrsSignal.emit(i)
+                        if i == num - 1:
+                            self.prgrsSignal.emit(i)
+                        elif i % (num//100) == 0:
+                            self.prgrsSignal.emit(i)
 
                     else:
                         dll.processImage(point, self.height, self.width, ImgArry, self.prms)
                         pointlst.append([point[0], point[1]])
-                        self.prgrsSignal.emit(i)
+                        if i == num - 1:
+                            self.prgrsSignal.emit(i)
+                        elif i % (num//100) == 0:
+                            self.prgrsSignal.emit(i)
             if pointlst:
                 DF = pd.DataFrame(np.array(pointlst).reshape(num, -1))
                 columnNames = ["x/Area"+str(i//2) if i%2==0 else "y/Area"+str(i//2) for i in range(DF.shape[1])]
