@@ -1053,6 +1053,7 @@ class SLM_Controller(QGroupBox):
 
         self.pitchBox = QDoubleSpinBox(self)
         self.pitchBox.setMinimum(1)
+        self.pitchBox.setSingleStep(0.1)
 
         self.rotationBox = QSpinBox(self)
         self.rotationBox.setMaximum(359)
@@ -1093,7 +1094,7 @@ class SLM_Controller(QGroupBox):
         self.intModBox.setMaximum(1.0)
         self.intModBox.setMinimum(0.0)
         self.intModBox.setDecimals(2)
-        self.intModBox.setSingleStep(0.1)
+        self.intModBox.setSingleStep(0.01)
         self.intModBox.valueChanged.connect(self.intensityModulationChanged)
 
         self.alignmentToolButton = QPushButton("Alignment Tool", self)
